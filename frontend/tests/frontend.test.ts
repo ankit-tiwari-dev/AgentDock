@@ -36,3 +36,4 @@ test("Frontend Dashboard HTML is structured and contains all 5 control views", (
   assert.ok(html.includes("new WebSocket"));
   assert.ok(html.includes("timelineContainer"));
 });
+

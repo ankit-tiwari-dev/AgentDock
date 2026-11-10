@@ -70,3 +70,4 @@ test("SidebarProvider generates HTML and dispatches messages", async () => {
   assert.equal(dispatchedMsg?.type, "key_saved");
   assert.equal(await manager.getGeminiKey(), "sk-gemini-new-key-123");
 });
+
