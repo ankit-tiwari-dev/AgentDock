@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { SupervisorService } from "../src/supervisor-service.ts";
 import { WebSocketBroadcaster } from "../src/websocket-server.ts";
+import { AgentDockBackendServer } from "../src/server.ts";
 
 test("SupervisorService generates Socratic questions in Phase 1", () => {
   const service = new SupervisorService();
@@ -98,57 +101,85 @@ test("WebSocketBroadcaster manages clients and encodes valid RFC6455 frames", ()
   });
 });
 
-test("AgentDockBackendServer handles Coach and Cost routes", async () => {
-  const { AgentDockBackendServer } = await import("../src/server.ts");
+interface MockHttpHandlerOptions {
+  method: string;
+  url: string;
+  body?: unknown;
+}
+
+function createMockHttpPair(options: MockHttpHandlerOptions) {
+  let statusCode = 200;
+  let responseData = "";
+
+  const req = {
+    method: options.method,
+    url: options.url,
+    headers: { "content-type": "application/json" },
+    on(event: string, callback: (chunk?: Buffer) => void) {
+      if (event === "data" && options.body !== undefined) {
+        const payload = typeof options.body === "string" ? options.body : JSON.stringify(options.body);
+        callback(Buffer.from(payload));
+      }
+      if (event === "end") {
+        callback();
+      }
+      return this;
+    },
+  } as unknown as IncomingMessage;
+
+  const res = {
+    setHeader() {
+      return this;
+    },
+    writeHead(code: number) {
+      statusCode = code;
+      return this;
+    },
+    end(chunk?: unknown) {
+      if (chunk !== undefined && chunk !== null) {
+        responseData = String(chunk);
+      }
+      return this;
+    },
+  } as unknown as ServerResponse;
+
+  return {
+    req,
+    res,
+    getStatusCode: () => statusCode,
+    getBody: () => responseData,
+    getJson: <T>() => JSON.parse(responseData) as T,
+  };
+}
+
+test("AgentDockBackendServer handles Coach and Cost routes", () => {
   const server = new AgentDockBackendServer();
 
-  // Test Coach route logic via internal handler
-  let coachStatus = 0;
-  let coachBody = "";
-  const mockCoachReq: any = {
+  // 1. Test Coach route logic
+  const coachPair = createMockHttpPair({
     method: "POST",
     url: "/api/coach/analyze",
-    headers: { "content-type": "application/json" },
-    on: (evt: string, cb: Function) => {
-      if (evt === "data") cb(Buffer.from(JSON.stringify({ prompt: "fix it" })));
-      if (evt === "end") cb();
-    },
-  };
-  const mockCoachRes: any = {
-    setHeader: () => {},
-    writeHead: (code: number) => { coachStatus = code; },
-    end: (chunk?: string) => { if (chunk) coachBody = chunk; },
-  };
+    body: { prompt: "fix it" },
+  });
 
-  (server as any).handleHttpRequest(mockCoachReq, mockCoachRes);
+  server.handleHttpRequest(coachPair.req, coachPair.res);
 
-  assert.equal(coachStatus, 200);
-  const coachData = JSON.parse(coachBody);
+  assert.equal(coachPair.getStatusCode(), 200);
+  const coachData = coachPair.getJson<{ score: number; rating: string }>();
   assert.equal(coachData.rating, "HIGH_RISK");
   assert.ok(coachData.score < 50);
 
-  // Test Cost route logic via internal handler
-  let costStatus = 0;
-  let costBody = "";
-  const mockCostReq: any = {
+  // 2. Test Cost route logic
+  const costPair = createMockHttpPair({
     method: "POST",
     url: "/api/cost/calculate",
-    headers: { "content-type": "application/json" },
-    on: (evt: string, cb: Function) => {
-      if (evt === "data") cb(Buffer.from(JSON.stringify({ modelName: "claude-3-5-sonnet", inputTokens: 10000, outputTokens: 2000 })));
-      if (evt === "end") cb();
-    },
-  };
-  const mockCostRes: any = {
-    setHeader: () => {},
-    writeHead: (code: number) => { costStatus = code; },
-    end: (chunk?: string) => { if (chunk) costBody = chunk; },
-  };
+    body: { modelName: "claude-3-5-sonnet", inputTokens: 10000, outputTokens: 2000 },
+  });
 
-  (server as any).handleHttpRequest(mockCostReq, mockCostRes);
+  server.handleHttpRequest(costPair.req, costPair.res);
 
-  assert.equal(costStatus, 200);
-  const costData = JSON.parse(costBody);
+  assert.equal(costPair.getStatusCode(), 200);
+  const costData = costPair.getJson<{ totalTokens: number; costUsd: number; formattedCost: string }>();
   assert.equal(costData.totalTokens, 12000);
   assert.equal(costData.costUsd, 0.06);
   assert.equal(costData.formattedCost, "$0.0600");

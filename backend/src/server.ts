@@ -74,7 +74,7 @@ export class AgentDockBackendServer {
     });
   }
 
-  private handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
+  public handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
     // 1. CORS headers
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
