@@ -57,3 +57,4 @@ export interface TrajectoryLoopCheckResponse {
   recommendation: "CONTINUE" | "WARN_AGENT" | "HALT_FOR_DEVELOPER";
   message: string;
 }
+

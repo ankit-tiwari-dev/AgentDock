@@ -1,5 +1,7 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import type { Socket } from "node:net";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { WebSocketBroadcaster } from "./websocket-server.ts";
 import { SupervisorService } from "./supervisor-service.ts";
 import type {
@@ -170,6 +172,23 @@ export class AgentDockBackendServer {
       return;
     }
 
+    // 6. Serve Web Dashboard Frontend
+    if (req.method === "GET" && (pathname === "/" || pathname === "/index.html" || !pathname.startsWith("/api/"))) {
+      const candidates = [
+        join(process.cwd(), "frontend", "public", "index.html"),
+        join(process.cwd(), "..", "frontend", "public", "index.html"),
+        join(import.meta.dirname, "..", "..", "frontend", "public", "index.html"),
+      ];
+      const resolved = candidates.find((p) => existsSync(p));
+
+      if (resolved) {
+        const html = readFileSync(resolved, "utf8");
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(html);
+        return;
+      }
+    }
+
     // Default 404
     this.sendJson(res, 404, { error: "Not Found", path: pathname });
   }
@@ -206,3 +225,4 @@ if (process.argv[1]?.endsWith("server.ts") || process.argv[1]?.endsWith("server.
     console.log(`WebSocket event stream ready at ws://${host}:${port}/ws/events`);
   });
 }
+

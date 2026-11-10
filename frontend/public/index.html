@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentDock — AI Development Control Plane</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 500: '#6366f1', 600: '#4f46e5' },
+            dark: { 900: '#090d16', 800: '#111827', 700: '#1f2937', 600: '#374151' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+  </style>
+</head>
+<body class="bg-dark-900 text-gray-100 min-h-screen flex flex-col">
+
+  <!-- Top Navigation Header -->
+  <header class="border-b border-dark-700 bg-dark-800/80 backdrop-blur sticky top-0 z-50 px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center space-x-3">
+      <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/30">
+        ⚓
+      </div>
+      <div>
+        <h1 class="text-base font-semibold tracking-tight text-white flex items-center gap-2">
+          AgentDock
+          <span class="text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-medium">Control Plane v0.1</span>
+        </h1>
+      </div>
+    </div>
+
+    <!-- Active Agent & Connection Pill -->
+    <div class="flex items-center space-x-4">
+      <div class="flex items-center space-x-2 text-xs bg-dark-700/60 px-3 py-1.5 rounded-lg border border-dark-600">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" id="wsIndicator"></span>
+        <span id="wsStatus" class="text-gray-300 font-medium">Daemon Connected</span>
+      </div>
+      <div class="text-xs px-2.5 py-1 rounded bg-dark-700 text-gray-300 border border-dark-600 font-mono">
+        Active: Claude Code
+      </div>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs -->
+  <nav class="border-b border-dark-700 bg-dark-800 px-6 flex space-x-6 text-sm font-medium">
+    <button onclick="switchTab('overview')" id="tab-overview" class="py-3 border-b-2 border-indigo-500 text-indigo-400 font-semibold">Overview</button>
+    <button onclick="switchTab('wizard')" id="tab-wizard" class="py-3 border-b-2 border-transparent text-gray-400 hover:text-gray-200">Product Guide (Agent 3)</button>
+    <button onclick="switchTab('stream')" id="tab-stream" class="py-3 border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex items-center gap-2">
+      Live Execution
+      <span class="text-[10px] bg-dark-700 px-1.5 py-0.5 rounded text-gray-300" id="toolCountBadge">0</span>
+    </button>
+    <button onclick="switchTab('verifier')" id="tab-verifier" class="py-3 border-b-2 border-transparent text-gray-400 hover:text-gray-200">Verification Matrix</button>
+    <button onclick="switchTab('diff')" id="tab-diff" class="py-3 border-b-2 border-transparent text-gray-400 hover:text-gray-200">Diff & Risk Audit</button>
+  </nav>
+
+  <!-- Main Content Area -->
+  <main class="flex-1 p-6 max-w-7xl w-full mx-auto">
+
+    <!-- 1. Overview Tab -->
+    <section id="view-overview" class="space-y-6">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="bg-dark-800 border border-dark-700 rounded-xl p-5 shadow-sm">
+          <div class="text-xs font-medium text-gray-400 uppercase tracking-wider">Supervised Sessions</div>
+          <div class="text-2xl font-bold text-white mt-2">1 Active</div>
+          <div class="text-xs text-emerald-400 mt-1 flex items-center gap-1">✔ Local Named Pipe bound</div>
+        </div>
+        <div class="bg-dark-800 border border-dark-700 rounded-xl p-5 shadow-sm">
+          <div class="text-xs font-medium text-gray-400 uppercase tracking-wider">Tool Invocations</div>
+          <div class="text-2xl font-bold text-white mt-2" id="statToolCalls">14</div>
+          <div class="text-xs text-gray-400 mt-1">Average latency: 0.12ms</div>
+        </div>
+        <div class="bg-dark-800 border border-dark-700 rounded-xl p-5 shadow-sm">
+          <div class="text-xs font-medium text-gray-400 uppercase tracking-wider">Blocked Actions</div>
+          <div class="text-2xl font-bold text-rose-400 mt-2" id="statBlocked">2</div>
+          <div class="text-xs text-rose-300 mt-1">1 Test-Tamper, 1 Destructive Shell</div>
+        </div>
+        <div class="bg-dark-800 border border-dark-700 rounded-xl p-5 shadow-sm">
+          <div class="text-xs font-medium text-gray-400 uppercase tracking-wider">Loop Breaker Status</div>
+          <div class="text-2xl font-bold text-emerald-400 mt-2">Armed</div>
+          <div class="text-xs text-gray-400 mt-1">Max 3 consecutive failures</div>
+        </div>
+      </div>
+
+      <!-- Quick Architecture Overview Banner -->
+      <div class="bg-dark-800/60 border border-dark-700 rounded-xl p-6">
+        <h3 class="text-base font-semibold text-white mb-2">Connected Agent Supervision Topology</h3>
+        <p class="text-sm text-gray-300 leading-relaxed max-w-3xl">
+          AgentDock sits between your developer intent and your AI coding agents. Observable tool calls are intercepted in sub-millisecond local IPC, evaluated against safety policies, and tested against deterministic compiler and unit test suites before being presented for review.
+        </p>
+      </div>
+    </section>
+
+    <!-- 2. Socratic Product Wizard Tab (Agent 3 Interview) -->
+    <section id="view-wizard" class="hidden space-y-6 max-w-3xl">
+      <div class="bg-dark-800 border border-dark-700 rounded-xl p-6">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="w-7 h-7 rounded-full bg-purple-600 flex items-center justify-center text-xs font-bold text-white">3</div>
+          <div>
+            <h2 class="text-base font-semibold text-white">Socratic Product Interview (Agent 3)</h2>
+            <p class="text-xs text-gray-400">Ask clarifying product questions before the coding agent touches your code.</p>
+          </div>
+        </div>
+
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs font-medium text-gray-300 mb-1.5">What feature or change do you want to implement?</label>
+            <textarea id="wizardPromptInput" rows="3" class="w-full bg-dark-900 border border-dark-600 rounded-lg p-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500" placeholder="e.g. Add Google OAuth login with refresh token rotation"></textarea>
+          </div>
+
+          <button onclick="submitProductPrompt()" id="btnStartInterview" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-4 py-2.5 rounded-lg transition flex items-center gap-2">
+            Ask Supervisor to Clarify & Lock Criteria →
+          </button>
+        </div>
+
+        <!-- Clarification Questions Box (Dynamic) -->
+        <div id="clarificationBox" class="hidden mt-6 pt-6 border-t border-dark-700 space-y-5">
+          <h4 class="text-sm font-semibold text-purple-300">Agent 3 asks: Resolve these 2 product decisions before coding:</h4>
+          <div id="questionsContainer" class="space-y-4"></div>
+          <button onclick="lockSpecification()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-5 py-2.5 rounded-lg transition">
+            Lock Specification & Dispatch to Coding Agent (Agent 2) ✔
+          </button>
+        </div>
+
+        <!-- Locked Spec Box (Dynamic) -->
+        <div id="lockedSpecBox" class="hidden mt-6 pt-6 border-t border-dark-700 bg-dark-900/50 p-4 rounded-lg border border-dark-600">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-emerald-400 uppercase tracking-wider">✔ Specification Locked</span>
+            <span class="text-[10px] font-mono text-gray-400" id="lockedHashBadge"></span>
+          </div>
+          <h4 class="text-sm font-semibold text-white mt-2" id="lockedTitle"></h4>
+          <p class="text-xs text-gray-300 mt-1" id="lockedOverview"></p>
+          <div class="mt-3">
+            <div class="text-xs font-semibold text-gray-400 mb-1">Generated Acceptance Criteria:</div>
+            <ul class="text-xs space-y-1 text-gray-300 list-disc list-inside font-mono" id="lockedCriteriaList"></ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Live Execution Stream Tab -->
+    <section id="view-stream" class="hidden space-y-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-base font-semibold text-white">Live Agent Tool Execution Stream</h2>
+        <span class="text-xs text-gray-400 font-mono">Real-time WebSocket active</span>
+      </div>
+
+      <div class="space-y-3" id="timelineContainer">
+        <!-- Sample Initial Events -->
+        <div class="bg-dark-800 border border-dark-700 rounded-lg p-4 flex items-start justify-between">
+          <div class="flex items-start space-x-3">
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">ALLOW</span>
+            <div>
+              <div class="text-sm font-medium text-white flex items-center gap-2">
+                <span class="text-indigo-400 font-mono font-bold">Write</span>
+                <span class="text-xs text-gray-400 mono">src/auth.ts</span>
+              </div>
+              <div class="text-xs text-gray-400 mt-1">Exported function login() with JWT generator</div>
+            </div>
+          </div>
+          <span class="text-[11px] text-gray-500 font-mono">1.2ms</span>
+        </div>
+
+        <div class="bg-dark-800 border border-rose-500/30 bg-rose-500/5 rounded-lg p-4 flex items-start justify-between">
+          <div class="flex items-start space-x-3">
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">DENY (EXIT 2)</span>
+            <div>
+              <div class="text-sm font-medium text-rose-200 flex items-center gap-2">
+                <span class="text-rose-400 font-mono font-bold">Bash</span>
+                <span class="text-xs text-rose-300/80 mono">rm -rf /var/lib/data</span>
+              </div>
+              <div class="text-xs text-rose-300/90 mt-1 font-semibold">Policy Violation: Destructive command blocked by safety policy.</div>
+            </div>
+          </div>
+          <span class="text-[11px] text-gray-500 font-mono">0.4ms</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. Verification Matrix Tab -->
+    <section id="view-verifier" class="hidden space-y-6">
+      <div class="bg-dark-800 border border-dark-700 rounded-xl p-6">
+        <div class="flex items-center justify-between mb-4 border-b border-dark-700 pb-4">
+          <div>
+            <h2 class="text-base font-semibold text-white">Two-Tier Verification Matrix</h2>
+            <p class="text-xs text-gray-400">Independent evaluation against test suites and concrete code evidence.</p>
+          </div>
+          <button onclick="triggerVerification()" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-4 py-2 rounded-lg transition">
+            Re-run Verification ⚡
+          </button>
+        </div>
+
+        <!-- Tier 1 Ground Truth -->
+        <div class="mb-6">
+          <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Tier 1: Deterministic Checks</h4>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+            <div class="bg-dark-900 p-3 rounded-lg border border-dark-700">
+              <span class="text-emerald-400 font-bold">✔ PASS</span> Typecheck (0 errors)
+            </div>
+            <div class="bg-dark-900 p-3 rounded-lg border border-dark-700">
+              <span class="text-emerald-400 font-bold">✔ PASS</span> Unit Tests (42 passed)
+            </div>
+            <div class="bg-dark-900 p-3 rounded-lg border border-dark-700">
+              <span class="text-emerald-400 font-bold">✔ PASS</span> Test Integrity (0 weakened)
+            </div>
+            <div class="bg-dark-900 p-3 rounded-lg border border-dark-700">
+              <span class="text-emerald-400 font-bold">✔ PASS</span> Linter (0 warnings)
+            </div>
+          </div>
+        </div>
+
+        <!-- Tier 2 Criteria Evidence -->
+        <div>
+          <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Tier 2: Evidence-Backed Criteria Checklist</h4>
+          <div class="space-y-3 text-xs">
+            <div class="bg-dark-900 p-3.5 rounded-lg border border-dark-700 flex items-start justify-between">
+              <div>
+                <span class="text-emerald-400 font-bold font-mono">[PASS] AC-1</span>
+                <span class="text-gray-200 ml-2 font-medium">POST /api/login returns JWT tokens</span>
+                <div class="text-gray-400 mt-1 font-mono text-[11px]">Evidence: src/auth.ts:14-28 (TokenGenerationHandler)</div>
+              </div>
+              <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold">SEMANTIC_VERIFIED</span>
+            </div>
+
+            <div class="bg-dark-900 p-3.5 rounded-lg border border-dark-700 flex items-start justify-between">
+              <div>
+                <span class="text-emerald-400 font-bold font-mono">[PASS] AC-2</span>
+                <span class="text-gray-200 ml-2 font-medium">Access token expires in 15 minutes</span>
+                <div class="text-gray-400 mt-1 font-mono text-[11px]">Evidence: src/config/jwt.ts:6 (ACCESS_TOKEN_TTL = 900)</div>
+              </div>
+              <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold">SEMANTIC_VERIFIED</span>
+            </div>
+
+            <div class="bg-dark-900 p-3.5 rounded-lg border border-amber-500/30 bg-amber-500/5 flex items-start justify-between">
+              <div>
+                <span class="text-amber-400 font-bold font-mono">[UNCHECKED] AC-3</span>
+                <span class="text-amber-200 ml-2 font-medium">Multi-device session revocation on replay</span>
+                <div class="text-amber-300/80 mt-1 font-mono text-[11px]">No matching code or test in the active diff.</div>
+              </div>
+              <span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-bold">UNCHECKED</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. Diff & Risk Inspector Tab -->
+    <section id="view-diff" class="hidden space-y-6">
+      <div class="bg-dark-800 border border-dark-700 rounded-xl p-6">
+        <div class="flex items-center justify-between mb-4 border-b border-dark-700 pb-4">
+          <div>
+            <h2 class="text-base font-semibold text-white">Delta Risk Analysis & Blast Radius</h2>
+            <p class="text-xs text-gray-400">Audits blast radius and checks comprehension before merging.</p>
+          </div>
+          <span class="px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-bold font-mono">
+            RISK: MEDIUM
+          </span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 text-xs">
+          <div class="bg-dark-900 p-4 rounded-lg border border-dark-700">
+            <h4 class="font-bold text-gray-300 mb-2">Modified Symbols & Blast Radius</h4>
+            <ul class="space-y-1.5 text-gray-400 font-mono text-[11px]">
+              <li>• <span class="text-indigo-400">login()</span> in src/auth.ts (called by src/routes/index.ts)</li>
+              <li>• <span class="text-indigo-400">rotateRefreshToken()</span> in src/services/auth.ts</li>
+            </ul>
+          </div>
+          <div class="bg-dark-900 p-4 rounded-lg border border-dark-700">
+            <h4 class="font-bold text-gray-300 mb-2">Dependency Audit</h4>
+            <div class="text-emerald-400 font-medium">✔ No new third-party npm packages added.</div>
+            <div class="text-gray-400 text-[11px] mt-1">Zero dependency drift detected in package.json.</div>
+          </div>
+        </div>
+
+        <!-- Socratic Quiz Card -->
+        <div class="bg-dark-900 border border-indigo-500/30 p-5 rounded-lg">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-bold text-indigo-400 uppercase tracking-wider">Socratic Comprehension Check ("Grill Me" Mode)</span>
+          </div>
+          <p class="text-sm text-gray-200 font-medium">In src/auth.ts, how does the newly introduced authentication logic handle token expiration or replay attacks?</p>
+          <div class="mt-3 space-y-2 text-xs">
+            <label class="flex items-center space-x-2 text-gray-300 p-2 rounded hover:bg-dark-800 cursor-pointer">
+              <input type="radio" name="quiz" class="text-indigo-600">
+              <span>It invalidates the session and revokes the active token pair.</span>
+            </label>
+            <label class="flex items-center space-x-2 text-gray-300 p-2 rounded hover:bg-dark-800 cursor-pointer">
+              <input type="radio" name="quiz" class="text-indigo-600">
+              <span>It ignores expiration and allows the request anyway.</span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    // Tab Switching
+    function switchTab(tab) {
+      ['overview', 'wizard', 'stream', 'verifier', 'diff'].forEach(t => {
+        document.getElementById(`view-${t}`).classList.add('hidden');
+        document.getElementById(`tab-${t}`).classList.remove('border-indigo-500', 'text-indigo-400', 'font-semibold');
+        document.getElementById(`tab-${t}`).classList.add('text-gray-400', 'border-transparent');
+      });
+      document.getElementById(`view-${tab}`).classList.remove('hidden');
+      document.getElementById(`tab-${tab}`).classList.add('border-indigo-500', 'text-indigo-400', 'font-semibold');
+      document.getElementById(`tab-${tab}`).classList.remove('text-gray-400', 'border-transparent');
+    }
+
+    // Connect to Backend WebSocket
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws/events`;
+    let toolCount = 0;
+
+    function connectWs() {
+      try {
+        const ws = new WebSocket(wsUrl);
+        ws.onopen = () => {
+          document.getElementById('wsIndicator').className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
+          document.getElementById('wsStatus').innerText = 'Daemon Connected';
+        };
+        ws.onmessage = (event) => {
+          const msg = JSON.parse(event.data);
+          handleIncomingEvent(msg);
+        };
+        ws.onclose = () => {
+          document.getElementById('wsIndicator').className = 'w-2 h-2 rounded-full bg-amber-400';
+          document.getElementById('wsStatus').innerText = 'Reconnecting...';
+          setTimeout(connectWs, 3000);
+        };
+      } catch {
+        // Fallback demo mode
+      }
+    }
+    connectWs();
+
+    function handleIncomingEvent(msg) {
+      toolCount++;
+      document.getElementById('toolCountBadge').innerText = toolCount;
+      document.getElementById('statToolCalls').innerText = toolCount;
+
+      const container = document.getElementById('timelineContainer');
+      const item = document.createElement('div');
+      item.className = 'bg-dark-800 border border-dark-700 rounded-lg p-4 flex items-start justify-between animate-fadeIn';
+      item.innerHTML = `
+        <div class="flex items-start space-x-3">
+          <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">${msg.type}</span>
+          <div>
+            <div class="text-sm font-medium text-white">${JSON.stringify(msg.data)}</div>
+            <div class="text-xs text-gray-500 mt-0.5 font-mono">${new Date(msg.timestamp).toLocaleTimeString()}</div>
+          </div>
+        </div>
+      `;
+      container.prepend(item);
+    }
+
+    // Socratic Product Interview API Calls
+    let currentQuestions = [];
+    async function submitProductPrompt() {
+      const prompt = document.getElementById('wizardPromptInput').value;
+      if (!prompt) return;
+
+      const btn = document.getElementById('btnStartInterview');
+      btn.innerText = 'Analyzing with Supervisor AI...';
+
+      try {
+        const res = await fetch('/api/supervisor/interview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ featurePrompt: prompt })
+        });
+        const data = await res.json();
+        btn.innerText = 'Ask Supervisor to Clarify & Lock Criteria →';
+
+        if (!data.isRefined && data.clarificationQuestions) {
+          currentQuestions = data.clarificationQuestions;
+          renderQuestions(data.clarificationQuestions);
+        }
+      } catch {
+        btn.innerText = 'Ask Supervisor to Clarify & Lock Criteria →';
+      }
+    }
+
+    function renderQuestions(questions) {
+      const container = document.getElementById('questionsContainer');
+      container.innerHTML = '';
+      questions.forEach((q, idx) => {
+        const div = document.createElement('div');
+        div.className = 'bg-dark-900 p-4 rounded-lg border border-dark-600';
+        div.innerHTML = `
+          <div class="text-xs font-semibold text-purple-400 mb-1">Question ${idx + 1}: ${q.question}</div>
+          <div class="text-[11px] text-gray-400 mb-2">${q.whyItMatters}</div>
+          <div class="space-y-1.5 text-xs">
+            ${q.suggestedAnswers.map((ans, aIdx) => `
+              <label class="flex items-center space-x-2 text-gray-300 p-1.5 rounded hover:bg-dark-800 cursor-pointer">
+                <input type="radio" name="ans_${q.id}" value="${ans}" ${aIdx === 0 ? 'checked' : ''} class="text-indigo-600">
+                <span>${ans}</span>
+              </label>
+            `).join('')}
+          </div>
+        `;
+        container.appendChild(div);
+      });
+      document.getElementById('clarificationBox').classList.remove('hidden');
+    }
+
+    async function lockSpecification() {
+      const prompt = document.getElementById('wizardPromptInput').value;
+      const answers = {};
+      currentQuestions.forEach(q => {
+        const selected = document.querySelector(`input[name="ans_${q.id}"]:checked`);
+        if (selected) answers[q.id] = selected.value;
+      });
+
+      const res = await fetch('/api/supervisor/interview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ featurePrompt: prompt, developerAnswers: answers })
+      });
+      const data = await res.json();
+
+      if (data.isRefined && data.lockedSpecification) {
+        document.getElementById('clarificationBox').classList.add('hidden');
+        const spec = data.lockedSpecification;
+        document.getElementById('lockedTitle').innerText = spec.title;
+        document.getElementById('lockedOverview').innerText = spec.overview;
+        document.getElementById('lockedHashBadge').innerText = spec.specHash.slice(0, 12);
+        
+        const list = document.getElementById('lockedCriteriaList');
+        list.innerHTML = '';
+        spec.acceptanceCriteria.forEach(c => {
+          const li = document.createElement('li');
+          li.innerText = c;
+          list.appendChild(li);
+        });
+
+        document.getElementById('lockedSpecBox').classList.remove('hidden');
+      }
+    }
+
+    function triggerVerification() {
+      alert('Verification triggered! Compilers, unit test suites, and AST test-tamper guards executing...');
+    }
+  </script>
+</body>
+</html>

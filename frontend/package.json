@@ -1,0 +1,14 @@
+{
+  "name": "@agentdock/frontend",
+  "version": "0.1.0",
+  "description": "AgentDock Platform Frontend - Modern visual control plane dashboard and Socratic wizard",
+  "type": "module",
+  "main": "./src/app.ts",
+  "types": "./src/app.ts",
+  "exports": {
+    ".": "./src/app.ts"
+  },
+  "scripts": {
+    "test": "node --test tests/**/*.test.ts"
+  }
+}
