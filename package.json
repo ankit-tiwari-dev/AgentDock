@@ -1,0 +1,22 @@
+{
+  "name": "agentdock-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AgentDock Platform - Web Dashboard, Cloud/Local Sync Server, and VS Code Extension",
+  "type": "module",
+  "workspaces": [
+    "backend",
+    "frontend",
+    "extension"
+  ],
+  "scripts": {
+    "start:backend": "node backend/src/server.ts",
+    "test": "node --test backend/tests/**/*.test.ts extension/tests/**/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
