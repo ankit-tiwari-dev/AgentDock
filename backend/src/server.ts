@@ -172,6 +172,105 @@ export class AgentDockBackendServer {
       return;
     }
 
+    // 6. Prompt Coach Endpoint (adapted from aGiTrack)
+    if (req.method === "POST" && pathname === "/api/coach/analyze") {
+      this.readJsonBody<{ prompt?: string }>(req, (body) => {
+        const prompt = body?.prompt?.trim() || "";
+        if (!prompt) {
+          this.sendJson(res, 400, { error: "Missing required 'prompt'" });
+          return;
+        }
+
+        const lower = prompt.toLowerCase();
+        const issues: string[] = [];
+        const recommendations: string[] = [];
+        let score = 85;
+
+        if (prompt.length < 15) {
+          issues.push("Prompt is too brief (< 15 characters). Coding agents often guess blindly.");
+          recommendations.push("Specify the exact file, expected output, and target behavior.");
+          score -= 40;
+        } else if (prompt.length < 40 && !lower.includes(".")) {
+          issues.push("Prompt lacks file references or error detail.");
+          recommendations.push("Include target file paths (e.g. `src/auth.ts`) or exact error text.");
+          score -= 20;
+        }
+
+        if (lower.includes("still failing") || lower.includes("you broke") || lower.includes("same mistake")) {
+          issues.push("Frustration phrasing detected. Coding agents cannot self-correct without diagnostic logs.");
+          recommendations.push("Paste the exact terminal error output or stack trace rather than saying 'it failed'.");
+          score -= 25;
+        }
+
+        const taskSeparators = lower.split(/and also|in addition|furthermore|, and /);
+        if (taskSeparators.length >= 4) {
+          issues.push("Multi-task overload: Prompt combines 4+ distinct tasks in a single turn.");
+          recommendations.push("Split into sequential turns: let the agent complete and test task 1 before assigning task 2.");
+          score -= 20;
+        }
+
+        const mentionsTests = lower.includes("test") || lower.includes("spec") || lower.includes("verify") || lower.includes("assert");
+        if (!mentionsTests && prompt.length > 50) {
+          recommendations.push("Tip: Add an acceptance test instruction: 'Run test suite to verify zero regressions.'");
+          score -= 5;
+        }
+
+        score = Math.max(10, Math.min(100, score));
+        let rating = "EXCELLENT";
+        if (score < 50) rating = "HIGH_RISK";
+        else if (score < 70) rating = "NEEDS_IMPROVEMENT";
+        else if (score < 85) rating = "GOOD";
+
+        const suggestedPrompt = (rating === "HIGH_RISK" || rating === "NEEDS_IMPROVEMENT")
+          ? `Objective: ${prompt}\nTarget Files: [specify path]\nAcceptance Criteria:\n1. [Expected outcome]\n2. Run tests to confirm zero regressions.`
+          : prompt;
+
+        this.sendJson(res, 200, {
+          prompt,
+          score,
+          rating,
+          detectedIssues: issues,
+          recommendations,
+          suggestedPrompt,
+        });
+      });
+      return;
+    }
+
+    // 7. Token Cost Calculator Endpoint (adapted from Builderz Labs Mission Control)
+    if (req.method === "POST" && pathname === "/api/cost/calculate") {
+      this.readJsonBody<{ modelName?: string; inputTokens?: number; outputTokens?: number }>(req, (body) => {
+        const model = body?.modelName || "claude-3-5-sonnet";
+        const inputTokens = Math.max(0, body?.inputTokens || 0);
+        const outputTokens = Math.max(0, body?.outputTokens || 0);
+
+        // Standard catalog per 1M tokens
+        let inputPerM = 3.0;
+        let outputPerM = 15.0;
+
+        if (model.includes("haiku")) { inputPerM = 0.8; outputPerM = 4.0; }
+        else if (model.includes("opus")) { inputPerM = 15.0; outputPerM = 75.0; }
+        else if (model.includes("gemini-1.5-flash")) { inputPerM = 0.075; outputPerM = 0.3; }
+        else if (model.includes("gemini-1.5-pro")) { inputPerM = 1.25; outputPerM = 5.0; }
+        else if (model.includes("gpt-4o-mini")) { inputPerM = 0.15; outputPerM = 0.6; }
+        else if (model.includes("gpt-4o")) { inputPerM = 2.5; outputPerM = 10.0; }
+        else if (model.includes("ollama")) { inputPerM = 0.0; outputPerM = 0.0; }
+
+        const costUsd = Number(((inputTokens / 1_000_000) * inputPerM + (outputTokens / 1_000_000) * outputPerM).toFixed(4));
+        const totalTokens = inputTokens + outputTokens;
+
+        this.sendJson(res, 200, {
+          model,
+          inputTokens,
+          outputTokens,
+          totalTokens,
+          costUsd,
+          formattedCost: `$${costUsd.toFixed(4)}`,
+        });
+      });
+      return;
+    }
+
     // 6. Serve Web Dashboard Frontend
     if (req.method === "GET" && (pathname === "/" || pathname === "/index.html" || !pathname.startsWith("/api/"))) {
       const candidates = [

@@ -97,3 +97,59 @@ test("WebSocketBroadcaster manages clients and encodes valid RFC6455 frames", ()
     data: { tool: "Bash", cmd: "npm test" },
   });
 });
+
+test("AgentDockBackendServer handles Coach and Cost routes", async () => {
+  const { AgentDockBackendServer } = await import("../src/server.ts");
+  const server = new AgentDockBackendServer();
+
+  // Test Coach route logic via internal handler
+  let coachStatus = 0;
+  let coachBody = "";
+  const mockCoachReq: any = {
+    method: "POST",
+    url: "/api/coach/analyze",
+    headers: { "content-type": "application/json" },
+    on: (evt: string, cb: Function) => {
+      if (evt === "data") cb(Buffer.from(JSON.stringify({ prompt: "fix it" })));
+      if (evt === "end") cb();
+    },
+  };
+  const mockCoachRes: any = {
+    setHeader: () => {},
+    writeHead: (code: number) => { coachStatus = code; },
+    end: (chunk?: string) => { if (chunk) coachBody = chunk; },
+  };
+
+  (server as any).handleHttpRequest(mockCoachReq, mockCoachRes);
+
+  assert.equal(coachStatus, 200);
+  const coachData = JSON.parse(coachBody);
+  assert.equal(coachData.rating, "HIGH_RISK");
+  assert.ok(coachData.score < 50);
+
+  // Test Cost route logic via internal handler
+  let costStatus = 0;
+  let costBody = "";
+  const mockCostReq: any = {
+    method: "POST",
+    url: "/api/cost/calculate",
+    headers: { "content-type": "application/json" },
+    on: (evt: string, cb: Function) => {
+      if (evt === "data") cb(Buffer.from(JSON.stringify({ modelName: "claude-3-5-sonnet", inputTokens: 10000, outputTokens: 2000 })));
+      if (evt === "end") cb();
+    },
+  };
+  const mockCostRes: any = {
+    setHeader: () => {},
+    writeHead: (code: number) => { costStatus = code; },
+    end: (chunk?: string) => { if (chunk) costBody = chunk; },
+  };
+
+  (server as any).handleHttpRequest(mockCostReq, mockCostRes);
+
+  assert.equal(costStatus, 200);
+  const costData = JSON.parse(costBody);
+  assert.equal(costData.totalTokens, 12000);
+  assert.equal(costData.costUsd, 0.06);
+  assert.equal(costData.formattedCost, "$0.0600");
+});
