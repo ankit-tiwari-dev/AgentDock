@@ -1,0 +1,83 @@
+{
+  "name": "agentdock-vscode",
+  "displayName": "AgentDock: AI Supervisor Control Plane",
+  "description": "Supervise AI coding agents, guide product decisions, block test-tampering, and independently verify code changes",
+  "version": "0.1.0",
+  "publisher": "AgentDock",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Programming Languages",
+    "Testing",
+    "Linters"
+  ],
+  "main": "./src/extension.ts",
+  "type": "module",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agentdock-activitybar",
+          "title": "AgentDock",
+          "icon": "$(shield)"
+        }
+      ]
+    },
+    "views": {
+      "agentdock-activitybar": [
+        {
+          "type": "webview",
+          "id": "agentdock.sidebarView",
+          "name": "AgentDock Supervisor"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "agentdock.openDashboard",
+        "title": "AgentDock: Open Control Dashboard"
+      },
+      {
+        "command": "agentdock.startDaemon",
+        "title": "AgentDock: Start Supervisor Daemon"
+      },
+      {
+        "command": "agentdock.verify",
+        "title": "AgentDock: Run Two-Tier Verification"
+      },
+      {
+        "command": "agentdock.configureKeys",
+        "title": "AgentDock: Configure Gemini / Claude API Keys"
+      }
+    ],
+    "configuration": {
+      "title": "AgentDock",
+      "properties": {
+        "agentdock.modelProvider": {
+          "type": "string",
+          "default": "gemini",
+          "enum": ["gemini", "claude", "ollama"],
+          "description": "AI provider used by Agent 3 (Supervisor AI)"
+        },
+        "agentdock.modelName": {
+          "type": "string",
+          "default": "gemini-1.5-pro",
+          "description": "Specific model name for the supervisor"
+        },
+        "agentdock.backendPort": {
+          "type": "number",
+          "default": 45820,
+          "description": "Port of the local AgentDock backend platform server"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test tests/**/*.test.ts"
+  }
+}
