@@ -7,10 +7,10 @@
 [![License](https://img.shields.io/badge/license-MIT-purple)](LICENSE)
 
 **AgentDock Platform** provides the developer-facing visual surfaces for the AgentDock ecosystem:
-1. **Interactive Web Dashboard:** Real-time execution stream, live policy badges, visual acceptance criteria matrix, delta diff inspector, and token spend tracker (from Builderz Labs Mission Control).
-2. **Prompt Coach & Socratic Advisor:** Interactive prompt analyzer (from aGiTrack) that detects ambiguity, frustration patterns, and multi-task overload before handing instructions to coding agents.
+1. **Interactive Web Dashboard:** Real-time execution stream, live policy badges, visual acceptance criteria matrix, delta diff inspector, and token spend tracker.
+2. **Prompt Coach & Socratic Advisor:** Interactive prompt analyzer that detects ambiguity, frustration patterns, and multi-task overload before handing instructions to coding agents.
 3. **Socratic Product Guide (Agent 3):** An AI interview wizard that asks 2–3 plain-English product questions before coding begins, locking specifications so the agent doesn't invent product rules.
-4. **VS Code Extension:** Activity Bar sidebar panel with OS Keychain key storage (`vscode.SecretStorage`) for Gemini 1.5 Pro, Claude 3.5 Sonnet, and Ollama, plus distributable [`.vsix` package](extension/agentdock-vscode-0.1.0.vsix).
+4. **VS Code Extension:** Activity Bar sidebar panel with OS Keychain key storage (`vscode.SecretStorage`) for Gemini 1.5 Pro, Claude 3.5 Sonnet, and Ollama, plus a `.vsix` package attached to each [GitHub Release](https://github.com/ankit-tiwari-dev/AgentDock/releases).
 
 ---
 
