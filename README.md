@@ -57,7 +57,6 @@
 ### 1. Build and launch the Platform Server & Web Dashboard
 
 ```bash
-cd agentdock-platform
 npm install
 npm run build --workspace frontend
 node backend/src/server.ts
@@ -69,6 +68,8 @@ http://localhost:45820
 ```
 
 The backend automatically serves the interactive dashboard and WebSocket stream simultaneously!
+To see live CLI activity, install the CLI hooks in a project with `ctrlplane init --agent claude`.
+Hook events are redacted, stored locally in `.agentdock/dashboard.json`, and streamed to connected dashboards.
 
 For frontend development with hot reload, start the backend and run `npm run dev --workspace frontend` in a second terminal. The frontend is available at `http://localhost:3000` and connects to the local backend on port `45820`.
 

@@ -4,6 +4,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { extname, join, relative, resolve, sep } from "node:path";
 import { WebSocketBroadcaster } from "./websocket-server.ts";
 import { SupervisorService } from "./supervisor-service.ts";
+import { DashboardStore } from "./dashboard-store.ts";
 import type {
   SupervisorInterviewRequest,
   TrajectoryLoopCheckRequest,
@@ -20,6 +21,7 @@ export class AgentDockBackendServer {
   private server;
   private broadcaster: WebSocketBroadcaster;
   private supervisor: SupervisorService;
+  private dashboard: DashboardStore;
   private port: number;
   private host: string;
 
@@ -28,6 +30,7 @@ export class AgentDockBackendServer {
     this.host = config?.host ?? "127.0.0.1";
     this.broadcaster = new WebSocketBroadcaster();
     this.supervisor = new SupervisorService();
+    this.dashboard = new DashboardStore();
 
     this.server = createServer((req, res) => {
       this.handleHttpRequest(req, res);
@@ -75,10 +78,14 @@ export class AgentDockBackendServer {
   }
 
   public handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
-    // 1. CORS headers
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    // Local Next.js dev server only; hook publishers are native processes and do not need CORS.
+    const origin = req.headers.origin;
+    if (origin === "http://localhost:3000" || origin === "http://127.0.0.1:3000") {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Vary", "Origin");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    }
 
     if (req.method === "OPTIONS") {
       res.writeHead(204);
@@ -98,6 +105,11 @@ export class AgentDockBackendServer {
         uptimeSeconds: Math.floor(process.uptime()),
         connectedClients: this.broadcaster.getConnectedClientsCount(),
       });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/dashboard/state") {
+      this.sendJson(res, 200, this.dashboard.snapshot());
       return;
     }
 
@@ -166,8 +178,19 @@ export class AgentDockBackendServer {
           return;
         }
 
+        let stored = false;
+        try {
+          stored = !!this.dashboard.ingest(event);
+        } catch (error) {
+          this.sendJson(res, 500, { error: `Could not persist dashboard event: ${String(error)}` });
+          return;
+        }
         this.broadcaster.broadcast(event);
-        this.sendJson(res, 200, { success: true, broadcastedTo: this.broadcaster.getConnectedClientsCount() });
+        this.sendJson(res, 200, {
+          success: true,
+          stored: !!stored,
+          broadcastedTo: this.broadcaster.getConnectedClientsCount(),
+        });
       });
       return;
     }
@@ -303,17 +326,9 @@ export class AgentDockBackendServer {
         res.end(readFileSync(file));
         return;
       }
-      const candidates = [
-        join(process.cwd(), "frontend", "public", "index.html"),
-        join(process.cwd(), "..", "frontend", "public", "index.html"),
-        join(import.meta.dirname, "..", "..", "frontend", "public", "index.html"),
-      ];
-      const resolved = candidates.find((p) => existsSync(p));
-
-      if (resolved) {
-        const html = readFileSync(resolved, "utf8");
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(html);
+      if (pathname === "/" || pathname === "/index.html") {
+        res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("Next.js frontend export is missing. Run npm run build --workspace frontend, then restart the backend.");
         return;
       }
     }
