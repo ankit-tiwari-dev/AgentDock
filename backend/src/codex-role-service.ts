@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { delimiter, resolve } from "node:path";
+import { existsSync, readdirSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -49,7 +51,7 @@ export class CodexRoleService {
     const schemaPath = join(tempDir, "schema.json");
     const outputPath = join(tempDir, "result.json");
     await writeFile(schemaPath, JSON.stringify(schema), "utf8");
-    const executable = process.env.AGENTDOCK_CODEX_PATH || (process.platform === "win32" ? "codex.exe" : "codex");
+    const executable = findCodexExecutable();
     try {
       await new Promise<void>((resolve, reject) => {
         const home = process.env.HOME || process.env.USERPROFILE;
@@ -67,4 +69,31 @@ export class CodexRoleService {
       await rm(tempDir, { recursive: true, force: true });
     }
   }
+}
+
+function findCodexExecutable(): string {
+  const configured = process.env.AGENTDOCK_CODEX_PATH;
+  if (configured) return configured;
+  const binary = process.platform === "win32" ? "codex.exe" : "codex";
+  for (const directory of (process.env.PATH || "").split(delimiter).filter(Boolean)) {
+    const candidate = resolve(directory, binary);
+    if (existsSync(candidate)) return candidate;
+  }
+  if (process.platform === "win32") {
+    const profile = process.env.USERPROFILE || process.env.HOME;
+    if (profile) {
+      for (const extensionRoot of [join(profile, ".antigravity-ide", "extensions"), join(profile, ".vscode", "extensions")]) {
+        try {
+          const folders = readdirSync(extensionRoot, { withFileTypes: true })
+            .filter((entry) => entry.isDirectory() && entry.name.startsWith("openai.chatgpt-"))
+            .sort((a, b) => b.name.localeCompare(a.name));
+          for (const folder of folders) {
+            const candidate = join(extensionRoot, folder.name, "bin", "windows-x86_64", binary);
+            if (existsSync(candidate)) return candidate;
+          }
+        } catch { /* Extension installation directories are optional. */ }
+      }
+    }
+  }
+  return binary;
 }
