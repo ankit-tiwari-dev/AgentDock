@@ -24,8 +24,8 @@ test("Frontend Dashboard HTML is structured and contains all 5 control views", (
   assert.ok(html.includes('id="wizardPromptInput"'));
   assert.ok(html.includes('id="clarificationBox"'));
   assert.ok(html.includes('id="lockedSpecBox"'));
-  assert.ok(html.includes('submitProductPrompt()'));
-  assert.ok(html.includes('lockSpecification()'));
+  assert.ok(html.includes("submitProductPrompt()"));
+  assert.ok(html.includes("lockSpecification()"));
 
   // Verify Two-Tier Verification components
   assert.ok(html.includes("Tier 1: Deterministic Checks"));
@@ -36,4 +36,3 @@ test("Frontend Dashboard HTML is structured and contains all 5 control views", (
   assert.ok(html.includes("new WebSocket"));
   assert.ok(html.includes("timelineContainer"));
 });
-

@@ -6,11 +6,7 @@ import { WebSocketBroadcaster } from "./websocket-server.ts";
 import { SupervisorService } from "./supervisor-service.ts";
 import { evaluatePromptQuality } from "./prompt-coach.ts";
 import { calculateTurnCost } from "./token-pricing.ts";
-import type {
-  SupervisorInterviewRequest,
-  TrajectoryLoopCheckRequest,
-  WSEventMessage,
-} from "./types.ts";
+import type { SupervisorInterviewRequest, TrajectoryLoopCheckRequest, WSEventMessage } from "./types.ts";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 
@@ -313,4 +309,3 @@ if (process.argv[1]?.endsWith("server.ts") || process.argv[1]?.endsWith("server.
       process.exitCode = 1;
     });
 }
-

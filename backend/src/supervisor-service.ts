@@ -156,7 +156,7 @@ export class SupervisorService {
 
   private compileSpecification(
     prompt: string,
-    answers: Record<string, string>
+    answers: Record<string, string>,
   ): {
     title: string;
     overview: string;
@@ -174,9 +174,7 @@ export class SupervisorService {
       "AC-TAMPER: Existing test assertions remain strictly intact.",
     ];
 
-    const hash = createHash("sha256")
-      .update(JSON.stringify({ title, overview, criteria }), "utf8")
-      .digest("hex");
+    const hash = createHash("sha256").update(JSON.stringify({ title, overview, criteria }), "utf8").digest("hex");
 
     const instructions = `You are Agent 2 (The Builder). Implement "${prompt}". You must strictly adhere to the following decisions: ${Object.values(answers).join("; ")}. Do not alter existing tests.`;
 

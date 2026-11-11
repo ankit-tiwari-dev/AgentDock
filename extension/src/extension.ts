@@ -16,4 +16,3 @@ export function activateExtension(context: ExtensionContextLike): {
 
   return { secretManager, sidebarProvider };
 }
-

@@ -2,13 +2,7 @@
  * AgentDock Web Dashboard Client Types and Configuration
  */
 
-export type DashboardTab =
-  | "overview"
-  | "wizard"
-  | "coach"
-  | "stream"
-  | "verifier"
-  | "diff";
+export type DashboardTab = "overview" | "wizard" | "coach" | "stream" | "verifier" | "diff";
 
 export interface DashboardConfig {
   backendHost: string;

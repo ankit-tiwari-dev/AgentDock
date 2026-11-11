@@ -11,10 +11,7 @@ export class AgentDockSidebarProvider {
     this.backendPort = backendPort;
   }
 
-  public async handleMessage(
-    message: WebviewMessage,
-    postMessageToWebview: (msg: unknown) => void
-  ): Promise<void> {
+  public async handleMessage(message: WebviewMessage, postMessageToWebview: (msg: unknown) => void): Promise<void> {
     switch (message.type) {
       case "ready": {
         const hasGemini = await this.secretManager.hasKeyForProvider("gemini");
@@ -294,4 +291,3 @@ export class AgentDockSidebarProvider {
 </html>`;
   }
 }
-

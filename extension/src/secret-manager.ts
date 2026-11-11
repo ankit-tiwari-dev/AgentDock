@@ -33,4 +33,3 @@ export class SecretManager {
     await this.secrets.delete("agentdock.claudeApiKey");
   }
 }
-
