@@ -172,7 +172,7 @@ export class AgentDockBackendServer {
       return;
     }
 
-    // 6. Prompt Coach Endpoint (adapted from aGiTrack)
+    // 6. Prompt Coach Endpoint
     if (req.method === "POST" && pathname === "/api/coach/analyze") {
       this.readJsonBody<{ prompt?: string }>(req, (body) => {
         const prompt = body?.prompt?.trim() || "";
@@ -237,7 +237,7 @@ export class AgentDockBackendServer {
       return;
     }
 
-    // 7. Token Cost Calculator Endpoint (adapted from Builderz Labs Mission Control)
+    // 7. Token Cost Calculator Endpoint
     if (req.method === "POST" && pathname === "/api/cost/calculate") {
       this.readJsonBody<{ modelName?: string; inputTokens?: number; outputTokens?: number }>(req, (body) => {
         const model = body?.modelName || "claude-3-5-sonnet";
