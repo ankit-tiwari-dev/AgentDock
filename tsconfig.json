@@ -10,9 +10,11 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
     "noEmit": true
   },
   "include": [
+    "scripts/**/*",
     "backend/src/**/*",
     "backend/tests/**/*",
     "frontend/src/**/*",
