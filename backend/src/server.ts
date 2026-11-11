@@ -1,14 +1,18 @@
-import { createServer, IncomingMessage, ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { WebSocketBroadcaster } from "./websocket-server.ts";
 import { SupervisorService } from "./supervisor-service.ts";
+import { evaluatePromptQuality } from "./prompt-coach.ts";
+import { calculateTurnCost } from "./token-pricing.ts";
 import type {
   SupervisorInterviewRequest,
   TrajectoryLoopCheckRequest,
   WSEventMessage,
 } from "./types.ts";
+
+const MAX_BODY_BYTES = 1024 * 1024;
 
 export interface ServerConfig {
   port?: number;
@@ -34,10 +38,12 @@ export class AgentDockBackendServer {
     });
 
     this.server.on("upgrade", (req: IncomingMessage, socket: Socket) => {
-      if (req.url === "/ws/events" || req.url === "/ws") {
+      const pathname = new URL(req.url || "/", "http://localhost").pathname;
+      const knownPath = pathname === "/ws/events" || pathname === "/ws";
+      if (knownPath && this.isAllowedHost(req.headers.host) && this.isAllowedOrigin(req.headers.origin)) {
         this.broadcaster.handleUpgrade(req, socket);
       } else {
-        socket.destroy();
+        socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
       }
     });
   }
@@ -69,21 +75,44 @@ export class AgentDockBackendServer {
   }
 
   public async stop(): Promise<void> {
+    this.broadcaster.closeAll();
     return new Promise((resolve) => {
       this.server.close(() => resolve());
     });
   }
 
-  public handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
-    // 1. CORS headers
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  /** Only this machine's own names, so a DNS name rebound to 127.0.0.1 is refused. */
+  private isAllowedHost(host: string | undefined): boolean {
+    if (!host) return false;
+    return [`127.0.0.1:${this.port}`, `localhost:${this.port}`, `[::1]:${this.port}`].includes(host.toLowerCase());
+  }
 
-    if (req.method === "OPTIONS") {
-      res.writeHead(204);
-      res.end();
+  /** No Origin means a non-browser client (the editor extension, curl). A browser must be on the dashboard itself. */
+  private isAllowedOrigin(origin: string | undefined): boolean {
+    if (origin === undefined) return true;
+    return [`http://127.0.0.1:${this.port}`, `http://localhost:${this.port}`, `http://[::1]:${this.port}`].includes(
+      origin.toLowerCase(),
+    );
+  }
+
+  public handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
+    // 1. Only this machine and the dashboard's own page may call the API. There are no CORS headers on purpose:
+    // without them a browser stops other sites from reading any response.
+    if (!this.isAllowedHost(req.headers.host)) {
+      this.sendJson(res, 403, { error: "Forbidden host" });
       return;
+    }
+    if (req.method === "POST") {
+      if (!this.isAllowedOrigin(req.headers.origin)) {
+        this.sendJson(res, 403, { error: "Forbidden origin" });
+        return;
+      }
+      // A cross-site page can send text/plain without asking first, but not application/json.
+      const contentType = (req.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
+      if (contentType !== "application/json") {
+        this.sendJson(res, 415, { error: "Content-Type must be application/json" });
+        return;
+      }
     }
 
     const url = new URL(req.url || "/", `http://${this.host}:${this.port}`);
@@ -103,7 +132,7 @@ export class AgentDockBackendServer {
 
     // 3. Supervisor Socratic Interview Endpoint
     if (req.method === "POST" && pathname === "/api/supervisor/interview") {
-      this.readJsonBody<SupervisorInterviewRequest>(req, (body) => {
+      this.readJsonBody<SupervisorInterviewRequest>(req, res, (body) => {
         if (!body || !body.featurePrompt) {
           this.sendJson(res, 400, { error: "Missing required 'featurePrompt'" });
           return;
@@ -132,7 +161,7 @@ export class AgentDockBackendServer {
 
     // 4. Trajectory Loop Check Endpoint
     if (req.method === "POST" && pathname === "/api/supervisor/loop-check") {
-      this.readJsonBody<TrajectoryLoopCheckRequest>(req, (body) => {
+      this.readJsonBody<TrajectoryLoopCheckRequest>(req, res, (body) => {
         if (!body || !Array.isArray(body.recentTools)) {
           this.sendJson(res, 400, { error: "Missing required 'recentTools' array" });
           return;
@@ -160,7 +189,7 @@ export class AgentDockBackendServer {
 
     // 5. Ingest and Broadcast Telemetry Event
     if (req.method === "POST" && pathname === "/api/events/broadcast") {
-      this.readJsonBody<WSEventMessage>(req, (event) => {
+      this.readJsonBody<WSEventMessage>(req, res, (event) => {
         if (!event || !event.type) {
           this.sendJson(res, 400, { error: "Invalid event payload" });
           return;
@@ -172,106 +201,36 @@ export class AgentDockBackendServer {
       return;
     }
 
-    // 6. Prompt Coach Endpoint (adapted from aGiTrack)
+    // 6. Prompt Coach Endpoint
     if (req.method === "POST" && pathname === "/api/coach/analyze") {
-      this.readJsonBody<{ prompt?: string }>(req, (body) => {
-        const prompt = body?.prompt?.trim() || "";
+      this.readJsonBody<{ prompt?: string }>(req, res, (body) => {
+        const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
         if (!prompt) {
           this.sendJson(res, 400, { error: "Missing required 'prompt'" });
           return;
         }
-
-        const lower = prompt.toLowerCase();
-        const issues: string[] = [];
-        const recommendations: string[] = [];
-        let score = 85;
-
-        if (prompt.length < 15) {
-          issues.push("Prompt is too brief (< 15 characters). Coding agents often guess blindly.");
-          recommendations.push("Specify the exact file, expected output, and target behavior.");
-          score -= 40;
-        } else if (prompt.length < 40 && !lower.includes(".")) {
-          issues.push("Prompt lacks file references or error detail.");
-          recommendations.push("Include target file paths (e.g. `src/auth.ts`) or exact error text.");
-          score -= 20;
-        }
-
-        if (lower.includes("still failing") || lower.includes("you broke") || lower.includes("same mistake")) {
-          issues.push("Frustration phrasing detected. Coding agents cannot self-correct without diagnostic logs.");
-          recommendations.push("Paste the exact terminal error output or stack trace rather than saying 'it failed'.");
-          score -= 25;
-        }
-
-        const taskSeparators = lower.split(/and also|in addition|furthermore|, and /);
-        if (taskSeparators.length >= 4) {
-          issues.push("Multi-task overload: Prompt combines 4+ distinct tasks in a single turn.");
-          recommendations.push("Split into sequential turns: let the agent complete and test task 1 before assigning task 2.");
-          score -= 20;
-        }
-
-        const mentionsTests = lower.includes("test") || lower.includes("spec") || lower.includes("verify") || lower.includes("assert");
-        if (!mentionsTests && prompt.length > 50) {
-          recommendations.push("Tip: Add an acceptance test instruction: 'Run test suite to verify zero regressions.'");
-          score -= 5;
-        }
-
-        score = Math.max(10, Math.min(100, score));
-        let rating = "EXCELLENT";
-        if (score < 50) rating = "HIGH_RISK";
-        else if (score < 70) rating = "NEEDS_IMPROVEMENT";
-        else if (score < 85) rating = "GOOD";
-
-        const suggestedPrompt = (rating === "HIGH_RISK" || rating === "NEEDS_IMPROVEMENT")
-          ? `Objective: ${prompt}\nTarget Files: [specify path]\nAcceptance Criteria:\n1. [Expected outcome]\n2. Run tests to confirm zero regressions.`
-          : prompt;
-
-        this.sendJson(res, 200, {
-          prompt,
-          score,
-          rating,
-          detectedIssues: issues,
-          recommendations,
-          suggestedPrompt,
-        });
+        this.sendJson(res, 200, evaluatePromptQuality(prompt));
       });
       return;
     }
 
-    // 7. Token Cost Calculator Endpoint (adapted from Builderz Labs Mission Control)
+    // 7. Token Cost Calculator Endpoint
     if (req.method === "POST" && pathname === "/api/cost/calculate") {
-      this.readJsonBody<{ modelName?: string; inputTokens?: number; outputTokens?: number }>(req, (body) => {
-        const model = body?.modelName || "claude-3-5-sonnet";
-        const inputTokens = Math.max(0, body?.inputTokens || 0);
-        const outputTokens = Math.max(0, body?.outputTokens || 0);
-
-        // Standard catalog per 1M tokens
-        let inputPerM = 3.0;
-        let outputPerM = 15.0;
-
-        if (model.includes("haiku")) { inputPerM = 0.8; outputPerM = 4.0; }
-        else if (model.includes("opus")) { inputPerM = 15.0; outputPerM = 75.0; }
-        else if (model.includes("gemini-1.5-flash")) { inputPerM = 0.075; outputPerM = 0.3; }
-        else if (model.includes("gemini-1.5-pro")) { inputPerM = 1.25; outputPerM = 5.0; }
-        else if (model.includes("gpt-4o-mini")) { inputPerM = 0.15; outputPerM = 0.6; }
-        else if (model.includes("gpt-4o")) { inputPerM = 2.5; outputPerM = 10.0; }
-        else if (model.includes("ollama")) { inputPerM = 0.0; outputPerM = 0.0; }
-
-        const costUsd = Number(((inputTokens / 1_000_000) * inputPerM + (outputTokens / 1_000_000) * outputPerM).toFixed(4));
-        const totalTokens = inputTokens + outputTokens;
-
-        this.sendJson(res, 200, {
-          model,
-          inputTokens,
-          outputTokens,
-          totalTokens,
-          costUsd,
-          formattedCost: `$${costUsd.toFixed(4)}`,
-        });
+      this.readJsonBody<{ modelName?: string; inputTokens?: number; outputTokens?: number }>(req, res, (body) => {
+        this.sendJson(
+          res,
+          200,
+          calculateTurnCost({
+            modelName: body?.modelName,
+            inputTokens: body?.inputTokens,
+            outputTokens: body?.outputTokens,
+          }),
+        );
       });
       return;
     }
 
-    // 6. Serve Web Dashboard Frontend
+    // 8. Serve Web Dashboard Frontend
     if (req.method === "GET" && (pathname === "/" || pathname === "/index.html" || !pathname.startsWith("/api/"))) {
       const candidates = [
         join(process.cwd(), "frontend", "public", "index.html"),
@@ -297,31 +256,61 @@ export class AgentDockBackendServer {
     res.end(JSON.stringify(data));
   }
 
-  private readJsonBody<T>(req: IncomingMessage, callback: (parsed: T | null) => void): void {
-    let body = "";
-    req.on("data", (chunk) => {
-      body += chunk.toString("utf8");
+  /**
+   * Collects the raw bytes and decodes once, so a character split across two chunks survives.
+   * Answers 413 / 400 / 500 itself and calls `callback` at most once.
+   */
+  private readJsonBody<T>(req: IncomingMessage, res: ServerResponse, callback: (parsed: T | null) => void): void {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let finished = false;
+    const fail = (status: number, error: string) => {
+      if (finished) return;
+      finished = true;
+      if (!res.headersSent) this.sendJson(res, status, { error });
+    };
+
+    req.on("data", (chunk: Buffer) => {
+      if (finished) return;
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        fail(413, `Request body is larger than ${MAX_BODY_BYTES} bytes`);
+        return;
+      }
+      chunks.push(chunk);
     });
     req.on("end", () => {
+      if (finished) return;
+      let parsed: T | null;
       try {
-        const parsed = JSON.parse(body) as T;
+        parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")) as T;
+      } catch {
+        fail(400, "Invalid JSON body");
+        return;
+      }
+      finished = true;
+      try {
         callback(parsed);
       } catch {
-        callback(null);
+        if (!res.headersSent) this.sendJson(res, 500, { error: "Internal error" });
       }
     });
-    req.on("error", () => {
-      callback(null);
-    });
+    req.on("error", () => fail(400, "Could not read request body"));
   }
 }
 
 // Standalone runner if executed directly
 if (process.argv[1]?.endsWith("server.ts") || process.argv[1]?.endsWith("server.js")) {
   const server = new AgentDockBackendServer({ port: 45820 });
-  server.start().then(({ host, port }) => {
-    console.log(`AgentDock Backend running at http://${host}:${port}`);
-    console.log(`WebSocket event stream ready at ws://${host}:${port}/ws/events`);
-  });
+  server
+    .start()
+    .then(({ host, port }) => {
+      console.log(`AgentDock Backend running at http://${host}:${port}`);
+      console.log(`WebSocket event stream ready at ws://${host}:${port}/ws/events`);
+    })
+    .catch((err: unknown) => {
+      console.error(`AgentDock Backend failed to start: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+    });
 }
 
