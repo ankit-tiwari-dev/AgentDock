@@ -2,7 +2,7 @@
 
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 
-type Tab = "overview" | "activity" | "sessions" | "policies" | "guide" | "coach";
+type Tab = "overview" | "activity" | "sessions" | "policies" | "guide" | "reviewer" | "coach";
 type DashboardEvent = {
   id: string;
   sessionId: string;
@@ -35,8 +35,9 @@ type DashboardSnapshot = {
   counts: { toolCalls: number; blockedCalls: number; reviewCalls: number; activeSessions: number; totalEvents: number };
 };
 type Question = { id: string; question: string; whyItMatters: string; suggestedAnswers: string[] };
-type LockedSpec = { title: string; overview: string; specHash: string; acceptanceCriteria: string[] };
+type LockedSpec = { title: string; overview: string; specHash: string; acceptanceCriteria: string[]; developerPrompt: string };
 type Interview = { clarificationQuestions?: Question[]; lockedSpecification?: LockedSpec };
+type Review = { summary: string; changes: Array<{ file: string; explanation: string }>; testsAndEvidence: string[]; risks: string[]; nextSteps: string[] };
 type CoachResult = { score: number; rating: string; suggestedPrompt: string; recommendations: string[]; detectedIssues: string[] };
 
 const EMPTY: DashboardSnapshot = { events: [], sessions: [], counts: { toolCalls: 0, blockedCalls: 0, reviewCalls: 0, activeSessions: 0, totalEvents: 0 } };
@@ -47,6 +48,7 @@ const NAV: { id: Tab; label: string; icon: string; group: string }[] = [
   { id: "sessions", label: "Agent sessions", icon: "◉", group: "WORKSPACE" },
   { id: "policies", label: "Policy activity", icon: "⬡", group: "GOVERNANCE" },
   { id: "guide", label: "Product guide", icon: "✳", group: "GOVERNANCE" },
+  { id: "reviewer", label: "Code explainer", icon: "⌕", group: "GOVERNANCE" },
   { id: "coach", label: "Prompt coach", icon: "✧", group: "GOVERNANCE" },
 ];
 
@@ -91,6 +93,7 @@ export default function Dashboard() {
   const [busy, setBusy] = useState(false);
   const [coach, setCoach] = useState<CoachResult | null>(null);
   const [interview, setInterview] = useState<Interview | null>(null);
+  const [review, setReview] = useState<Review | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -166,7 +169,7 @@ export default function Dashboard() {
       setInterview(result);
       const questions = result.clarificationQuestions || [];
       setAnswers(Object.fromEntries(questions.map((question) => [question.id, question.suggestedAnswers[0]])));
-    } catch { setToast("Product Guide is unavailable. Check that the AgentDock backend is running."); }
+    } catch (error) { setToast(error instanceof Error ? error.message : "Supervisor Codex is unavailable. Check that Codex CLI is installed and signed in."); }
     finally { setBusy(false); }
   }
 
@@ -175,7 +178,14 @@ export default function Dashboard() {
     try {
       setInterview(await postJson<Interview>("/api/supervisor/interview", { featurePrompt: prompt, developerAnswers: answers }));
       setToast("Specification locked and ready to review.");
-    } catch { setToast("Could not lock the specification. Check the backend connection."); }
+    } catch (error) { setToast(error instanceof Error ? error.message : "Could not finalize the specification."); }
+    finally { setBusy(false); }
+  }
+
+  async function explainChanges() {
+    setBusy(true); setReview(null);
+    try { setReview(await postJson<Review>("/api/reviewer/explain", {})); }
+    catch (error) { setToast(error instanceof Error ? error.message : "Reviewer Codex is unavailable."); }
     finally { setBusy(false); }
   }
 
@@ -210,7 +220,9 @@ export default function Dashboard() {
 
         {tab === "policies" && <section className="panel full-panel"><div className="panel-heading"><div><h2>Observed policy decisions</h2><p>Rules appear here when a real hook event matches them. Configure policies with the CLI.</p></div></div><div className="policy-cards">{summarizeRules(snapshot.events).map((rule) => <PolicyCard key={rule.id} rule={rule} />)}{summarizeRules(snapshot.events).length === 0 && <EmptyState title="No matched rules recorded" body="Tool calls are still counted. A rule appears here when a hook reports its matched policy ID." />}</div><div className="connect-panel"><div><h3>Policy configuration</h3><p>Use the CLI to list, inspect, and change rule settings for the current project.</p></div><button className="secondary-button" onClick={() => copy("ctrlplane policies list", "Command")}>Copy command</button></div></section>}
 
-        {tab === "guide" && <section className="guide-layout"><div className="panel guide-panel"><div className="guide-intro"><div className="guide-mark">✳</div><div><div className="eyebrow">PRODUCT GUIDE</div><h2>Clarify the plan<br />before coding begins.</h2><p>Send a feature idea to the configured AgentDock supervisor and resolve product decisions before dispatch.</p></div></div><form onSubmit={askGuide} className="form-stack"><label htmlFor="feature-prompt">What would you like to build?</label><textarea id="feature-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={5} placeholder="Describe the feature or change…" /><div className="form-bottom"><span>Submitted to the local AgentDock backend.</span><button className="primary-button" disabled={busy || !prompt.trim()}>{busy ? "Thinking…" : "Clarify this idea"} <span>→</span></button></div></form>{interview?.clarificationQuestions && <div className="question-stack"><div className="section-kicker">DECISIONS TO RESOLVE</div>{interview.clarificationQuestions.map((question, index) => <div className="question-card" key={question.id}><strong><span>{String(index + 1).padStart(2, "0")}</span>{question.question}</strong><p>{question.whyItMatters}</p>{question.suggestedAnswers.map((answer) => <label className="choice" key={answer}><input type="radio" name={question.id} checked={answers[question.id] === answer} onChange={() => setAnswers((current) => ({ ...current, [question.id]: answer }))} /><span>{answer}</span></label>)}</div>)}<button className="primary-button" disabled={busy} onClick={lockGuide}>Lock specification <span>→</span></button></div>}{interview?.lockedSpecification && <div className="locked-spec"><strong>✓ Specification locked</strong><small>{interview.lockedSpecification.specHash.slice(0, 12)}</small><h3>{interview.lockedSpecification.title}</h3><p>{interview.lockedSpecification.overview}</p><ul>{interview.lockedSpecification.acceptanceCriteria.map((criterion) => <li key={criterion}>{criterion}</li>)}</ul></div>}</div><aside className="guide-aside"><div className="panel"><span className="aside-label">BACKEND STATUS</span><div className="workflow-step"><span>{backendReachable ? "✓" : "!"}</span><div><strong>{backendReachable ? "Backend available" : "Backend unavailable"}</strong><p>{backendReachable ? "Requests go to your local AgentDock service." : "Start the backend on port 45820."}</p></div></div><div className="workflow-step"><span>02</span><div><strong>Specification output</strong><p>Questions and acceptance criteria come from the supervisor API.</p></div></div></div></aside></section>}
+        {tab === "guide" && <section className="guide-layout"><div className="panel guide-panel"><div className="guide-intro"><div className="guide-mark">✳</div><div><div className="eyebrow">CODEX SUPERVISOR</div><h2>Clarify the plan<br />before coding begins.</h2><p>A read-only Codex session inspects this repository, asks product questions, and prepares a handoff for your separate developer Codex.</p></div></div><form onSubmit={askGuide} className="form-stack"><label htmlFor="feature-prompt">What would you like to build?</label><textarea id="feature-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={5} placeholder="Describe the feature or change…" /><div className="form-bottom"><span>Runs Codex CLI on this repository when submitted.</span><button className="primary-button" disabled={busy || !prompt.trim()}>{busy ? "Codex is reviewing…" : "Ask supervisor"} <span>→</span></button></div></form>{interview?.clarificationQuestions && <div className="question-stack"><div className="section-kicker">CODEX SUPERVISOR · DECISIONS TO RESOLVE</div>{interview.clarificationQuestions.map((question, index) => <div className="question-card" key={question.id}><strong><span>{String(index + 1).padStart(2, "0")}</span>{question.question}</strong><p>{question.whyItMatters}</p>{question.suggestedAnswers.map((answer) => <label className="choice" key={answer}><input type="radio" name={question.id} checked={answers[question.id] === answer} onChange={() => setAnswers((current) => ({ ...current, [question.id]: answer }))} /><span>{answer}</span></label>)}</div>)}<button className="primary-button" disabled={busy || !Object.keys(answers).length} onClick={lockGuide}>{busy ? "Preparing handoff…" : "Create developer handoff"} <span>→</span></button></div>}{interview?.lockedSpecification && <div className="locked-spec"><strong>✓ Developer handoff ready</strong><small>{interview.lockedSpecification.specHash.slice(0, 12)}</small><h3>{interview.lockedSpecification.title}</h3><p>{interview.lockedSpecification.overview}</p><ul>{interview.lockedSpecification.acceptanceCriteria.map((criterion) => <li key={criterion}>{criterion}</li>)}</ul><h3>Prompt for your developer Codex</h3><pre className="role-output">{interview.lockedSpecification.developerPrompt}</pre><button className="secondary-button" onClick={() => copy(interview.lockedSpecification!.developerPrompt, "Developer handoff")}>Copy prompt for developer Codex</button></div>}</div><aside className="guide-aside"><div className="panel"><span className="aside-label">WORKFLOW</span><div className="workflow-step"><span>{backendReachable ? "✓" : "!"}</span><div><strong>{backendReachable ? "Backend available" : "Backend unavailable"}</strong><p>{backendReachable ? "Supervisor requests run through the local service." : "Start the backend on port 45820."}</p></div></div><div className="workflow-step"><span>01</span><div><strong>Supervisor Codex</strong><p>Inspects the repository read-only and asks contextual questions.</p></div></div><div className="workflow-step"><span>02</span><div><strong>Your developer Codex</strong><p>Paste the copied handoff into a separate interactive Codex session.</p></div></div><div className="workflow-step"><span>03</span><div><strong>Code explainer</strong><p>After implementation, ask the reviewer to explain the real diff.</p></div></div></div></aside></section>}
+
+        {tab === "reviewer" && <section className="guide-layout"><div className="panel guide-panel"><div className="guide-intro"><div className="guide-mark">⌕</div><div><div className="eyebrow">READ-ONLY CODEX REVIEWER</div><h2>Understand what<br />the developer changed.</h2><p>After your developer Codex finishes, a separate Codex CLI run inspects the current Git diff and explains it in plain English.</p></div></div><button className="primary-button" disabled={busy} onClick={explainChanges}>{busy ? "Reviewer is inspecting…" : "Explain current changes"} <span>→</span></button>{review && <div className="role-review"><div className="review-summary"><span className="section-kicker">SUMMARY</span><p>{review.summary}</p></div><div className="review-block"><h3>Files and behavior</h3>{review.changes.length ? review.changes.map((change) => <article key={change.file}><strong>{change.file}</strong><p>{change.explanation}</p></article>) : <p>No changed files were reported.</p>}</div><div className="review-columns"><ReviewList title="Tests and evidence" items={review.testsAndEvidence} /><ReviewList title="Risks" items={review.risks} /><ReviewList title="Next steps" items={review.nextSteps} /></div></div>}</div><aside className="guide-aside"><div className="panel"><span className="aside-label">REVIEW FLOW</span><div className="workflow-step"><span>01</span><div><strong>Finish coding first</strong><p>Run your interactive developer Codex and review its result.</p></div></div><div className="workflow-step"><span>02</span><div><strong>Request explanation</strong><p>The reviewer reads git status, git diff, and changed files without editing.</p></div></div></div></aside></section>}
 
         {tab === "coach" && <section className="coach-layout"><div className="panel coach-panel"><div className="guide-mark">✧</div><div className="eyebrow">PROMPT COACH</div><h2>Review a prompt before<br /><span>sending it to an agent.</span></h2><p className="coach-copy">Analysis is returned by the local AgentDock coach endpoint.</p><form onSubmit={runCoach} className="form-stack"><label htmlFor="coach-prompt">Your prompt</label><textarea id="coach-prompt" value={coachPrompt} onChange={(e) => setCoachPrompt(e.target.value)} rows={7} placeholder="Paste the task you are about to send…" /><div className="form-bottom"><span>Sent to the local backend.</span><button className="primary-button" disabled={busy || !coachPrompt.trim()}>{busy ? "Analyzing…" : "Review prompt"} <span>→</span></button></div></form>{coach && <div className="coach-result"><div className="result-score"><strong>{coach.score}</strong><span>/ 100</span><i>{coach.rating.replaceAll("_", " ")}</i></div><div><strong>Recommendations</strong><ul>{coach.recommendations.map((item) => <li key={item}>{item}</li>)}</ul>{coach.detectedIssues.length > 0 && <p className="coach-issues">{coach.detectedIssues.join(" · ")}</p>}<button className="secondary-button" onClick={() => copy(coach.suggestedPrompt, "Refined prompt")}>Copy refined prompt</button></div><pre>{coach.suggestedPrompt}</pre></div>}</div><aside className="coach-benefits"><div className="benefit"><span>⌕</span><strong>Backend-derived result</strong><p>The score and suggestions returned by your running service are shown here.</p></div><div className="benefit"><span>↻</span><strong>Try another prompt</strong><p>Submit updated wording to get a fresh analysis.</p></div></aside></section>}
       </div>
@@ -259,6 +271,10 @@ function ConnectHint({ onCopy }: { onCopy: (text: string, label: string) => void
   return <div className="connect-hint"><span>Run from your project:</span><code>{command}</code><button className="text-button" onClick={() => onCopy(command, "Setup command")}>Copy</button></div>;
 }
 
+function ReviewList({ title, items }: { title: string; items: string[] }) {
+  return <div className="review-list"><h3>{title}</h3>{items.length ? <ul>{items.map((item, index) => <li key={`${title}-${index}`}>{item}</li>)}</ul> : <p>None reported.</p>}</div>;
+}
+
 function summarizeRules(events: DashboardEvent[]) {
   const rules = new Map<string, { id: string; count: number; latestDecision: string; latestReason: string; timestamp: number }>();
   for (const event of events) {
@@ -281,5 +297,5 @@ function statusTone(status: string) {
 }
 
 function sectionDescription(tab: Tab) {
-  return ({ activity: "Live, persisted records of tool hooks and their policy decisions.", sessions: "Agent sessions seen by your installed hooks.", policies: "Policy rules observed in actual tool-call decisions.", guide: "Resolve product decisions through the local supervisor API.", coach: "Analyze prompts through the local coach API." } as Record<string, string>)[tab] || "AgentDock workspace.";
+  return ({ activity: "Live, persisted records of tool hooks and their policy decisions.", sessions: "Agent sessions seen by your installed hooks.", policies: "Policy rules observed in actual tool-call decisions.", guide: "Resolve product decisions with a read-only Codex supervisor.", reviewer: "Get a plain-English explanation from a separate read-only Codex reviewer.", coach: "Analyze prompts through the local coach API." } as Record<string, string>)[tab] || "AgentDock workspace.";
 }

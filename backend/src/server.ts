@@ -5,6 +5,7 @@ import { extname, join, relative, resolve, sep } from "node:path";
 import { WebSocketBroadcaster } from "./websocket-server.ts";
 import { SupervisorService } from "./supervisor-service.ts";
 import { DashboardStore } from "./dashboard-store.ts";
+import { CodexRoleService } from "./codex-role-service.ts";
 import type {
   SupervisorInterviewRequest,
   TrajectoryLoopCheckRequest,
@@ -22,6 +23,7 @@ export class AgentDockBackendServer {
   private broadcaster: WebSocketBroadcaster;
   private supervisor: SupervisorService;
   private dashboard: DashboardStore;
+  private codexRoles: CodexRoleService;
   private port: number;
   private host: string;
 
@@ -31,6 +33,7 @@ export class AgentDockBackendServer {
     this.broadcaster = new WebSocketBroadcaster();
     this.supervisor = new SupervisorService();
     this.dashboard = new DashboardStore();
+    this.codexRoles = new CodexRoleService(config?.projectPath ?? process.cwd());
 
     this.server = createServer((req, res) => {
       this.handleHttpRequest(req, res);
@@ -121,24 +124,19 @@ export class AgentDockBackendServer {
           return;
         }
 
-        const interviewResult = this.supervisor.conductInterview(body);
-
-        // Broadcast spec lock event if refined
-        if (interviewResult.isRefined && interviewResult.lockedSpecification) {
-          this.broadcaster.broadcast({
-            type: "spec_updated",
-            sessionId: "active_session",
-            timestamp: Date.now(),
-            data: {
-              title: interviewResult.lockedSpecification.title,
-              specHash: interviewResult.lockedSpecification.specHash,
-              criteriaCount: interviewResult.lockedSpecification.acceptanceCriteria.length,
-            },
-          });
-        }
-
-        this.sendJson(res, 200, interviewResult);
+        void this.codexRoles.interview(body.featurePrompt, body.developerAnswers).then((interviewResult) => {
+          if (interviewResult.isRefined && interviewResult.lockedSpecification) {
+            this.broadcaster.broadcast({ type: "spec_updated", sessionId: "active_session", timestamp: Date.now(), data: { title: interviewResult.lockedSpecification.title, specHash: interviewResult.lockedSpecification.specHash, criteriaCount: interviewResult.lockedSpecification.acceptanceCriteria.length } });
+          }
+          this.sendJson(res, 200, interviewResult);
+        }).catch((error: unknown) => this.sendJson(res, 503, { error: error instanceof Error ? error.message : String(error) }));
       });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/reviewer/explain") {
+      void this.codexRoles.review().then((result) => this.sendJson(res, 200, result))
+        .catch((error: unknown) => this.sendJson(res, 503, { error: error instanceof Error ? error.message : String(error) }));
       return;
     }
 
