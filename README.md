@@ -35,7 +35,7 @@
 | Module | Location | Description |
 |---|---|---|
 | **`backend/`** | [`backend/`](backend/) | Fastify/Node.js REST API + RFC 6455 WebSocket broadcaster + Supervisor Service. |
-| **`frontend/`** | [`frontend/`](frontend/) | Dark-mode Web Dashboard with live stream, criteria matrix, and diff inspector. |
+| **`frontend/`** | [`frontend/`](frontend/) | Next.js App Router dashboard with live activity, agent sessions, policy center, and prompt tools. |
 | **`extension/`** | [`extension/`](extension/) | VS Code Extension with Activity Bar sidebar and OS Keychain credential storage. |
 
 ---
@@ -54,10 +54,12 @@
 
 ## Quickstart
 
-### 1. Launch the Platform Server & Web Dashboard
+### 1. Build and launch the Platform Server & Web Dashboard
 
 ```bash
 cd agentdock-platform
+npm install
+npm run build --workspace frontend
 node backend/src/server.ts
 ```
 
@@ -67,6 +69,8 @@ http://localhost:45820
 ```
 
 The backend automatically serves the interactive dashboard and WebSocket stream simultaneously!
+
+For frontend development with hot reload, start the backend and run `npm run dev --workspace frontend` in a second terminal. The frontend is available at `http://localhost:3000` and connects to the local backend on port `45820`.
 
 ---
 

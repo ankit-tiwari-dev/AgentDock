@@ -1,7 +1,7 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import type { Socket } from "node:net";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { extname, join, relative, resolve, sep } from "node:path";
 import { WebSocketBroadcaster } from "./websocket-server.ts";
 import { SupervisorService } from "./supervisor-service.ts";
 import type {
@@ -273,6 +273,36 @@ export class AgentDockBackendServer {
 
     // 6. Serve Web Dashboard Frontend
     if (req.method === "GET" && (pathname === "/" || pathname === "/index.html" || !pathname.startsWith("/api/"))) {
+      const exportRoots = [
+        join(process.cwd(), "frontend", "out"),
+        join(process.cwd(), "..", "frontend", "out"),
+        join(import.meta.dirname, "..", "..", "frontend", "out"),
+      ];
+      const decodedPath = decodeURIComponent(pathname);
+      for (const root of exportRoots) {
+        const candidate = resolve(root, `.${decodedPath}`);
+        const fromRoot = relative(resolve(root), candidate);
+        if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`)) continue;
+        const fileCandidates = [candidate, join(candidate, "index.html")];
+        const file = fileCandidates.find((path) => existsSync(path) && statSync(path).isFile());
+        if (!file) continue;
+        const types: Record<string, string> = {
+          ".html": "text/html; charset=utf-8",
+          ".js": "text/javascript; charset=utf-8",
+          ".css": "text/css; charset=utf-8",
+          ".json": "application/json; charset=utf-8",
+          ".svg": "image/svg+xml",
+          ".png": "image/png",
+          ".jpg": "image/jpeg",
+          ".webp": "image/webp",
+          ".ico": "image/x-icon",
+          ".woff": "font/woff",
+          ".woff2": "font/woff2",
+        };
+        res.writeHead(200, { "Content-Type": types[extname(file)] ?? "application/octet-stream" });
+        res.end(readFileSync(file));
+        return;
+      }
       const candidates = [
         join(process.cwd(), "frontend", "public", "index.html"),
         join(process.cwd(), "..", "frontend", "public", "index.html"),
