@@ -1,99 +1,58 @@
 # AgentDock Platform
 
-> **The Web Dashboard, Real-time WebSocket Server, and VS Code Extension for AgentDock.**
+> The local web dashboard, backend and editor-extension prototype for [AgentDock](https://github.com/ankit-tiwari-dev/agentdock-cli).
 
-[![Tests](https://img.shields.io/badge/tests-8%2F8%20passing-emerald)](https://github.com/ankit-tiwari-dev/AgentDock)
-[![Node](https://img.shields.io/badge/node-%3E%3D22.0.0-blue)](https://nodejs.org)
-[![License](https://img.shields.io/badge/license-MIT-purple)](LICENSE)
+[![CI](https://github.com/ankit-tiwari-dev/AgentDock/actions/workflows/ci.yml/badge.svg)](https://github.com/ankit-tiwari-dev/AgentDock/actions/workflows/ci.yml)
+[![Node](https://img.shields.io/badge/node-%3E%3D22.18-blue)](https://nodejs.org)
 
-**AgentDock Platform** provides the developer-facing visual surfaces for the AgentDock ecosystem:
-1. **Interactive Web Dashboard:** Real-time execution stream, live policy badges, visual acceptance criteria matrix, delta diff inspector, and token spend tracker.
-2. **Prompt Coach & Socratic Advisor:** Interactive prompt analyzer that detects ambiguity, frustration patterns, and multi-task overload before handing instructions to coding agents.
-3. **Socratic Product Guide (Agent 3):** An AI interview wizard that asks 2–3 plain-English product questions before coding begins, locking specifications so the agent doesn't invent product rules.
-4. **VS Code Extension:** Activity Bar sidebar panel with OS Keychain key storage (`vscode.SecretStorage`) for Gemini 1.5 Pro, Claude 3.5 Sonnet, and Ollama, plus a `.vsix` package attached to each [GitHub Release](https://github.com/ankit-tiwari-dev/AgentDock/releases).
+The supervisor itself (hooks, policy engine, audit trail, context packs) lives in `agentdock-cli`. This repo holds the surfaces a developer looks at.
 
----
+## What is here
 
-## Ecosystem Architecture
+| Workspace    | What it is                                                                                                                                                                                                            |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `backend/`   | A plain `node:http` server on `127.0.0.1:45820`: a JSON API (supervisor interview, loop check, event broadcast, prompt coach, token cost) and a WebSocket event stream at `/ws/events`. It also serves the dashboard. |
+| `frontend/`  | One HTML page: the dashboard. The interview wizard, prompt coach and live event timeline call the backend.                                                                                                            |
+| `extension/` | Sidebar webview, message handling and key storage for an editor extension. It is not yet a loadable extension: there is no `activate` entry point and no build step (`ISSUE.md` → I-6).                               |
 
-```
-┌─────────────────────────────────┐                 ┌─────────────────────────────────┐
-│       agentdock-cli             │                 │        AgentDock Platform       │
-│   (Core Engine & CLI Hooks)     │  Telemetry &    │  (Web, Backend & VS Code Ext)   │
-├─────────────────────────────────┤  WebSockets     ├─────────────────────────────────┤
-│ • PreToolUse Interception       │ ──────────────► │ • Real-Time Web Dashboard       │
-│ • Anti-Test-Gaming Guard        │                 │ • Socratic Product Guide (AI)   │
-│ • Destructive Command Blocking  │                 │ • Verification Matrix Board     │
-│ • SQLite WAL + Secret Redaction │                 │ • VS Code Activity Bar Sidebar  │
-└─────────────────────────────────┘                 └─────────────────────────────────┘
-```
+### Status
 
----
+- **Real:** the API endpoints, the WebSocket stream, and the dashboard's interview wizard, prompt coach and event timeline.
+- **Demo content:** the overview numbers, the seeded timeline entries, the verification board and the diff view are fixed sample data. Nothing in `agentdock-cli` posts events to this backend yet (`ISSUE.md` → I-7).
 
-## Platform Modules
+## Security model
 
-| Module | Location | Description |
-|---|---|---|
-| **`backend/`** | [`backend/`](backend/) | Fastify/Node.js REST API + RFC 6455 WebSocket broadcaster + Supervisor Service. |
-| **`frontend/`** | [`frontend/`](frontend/) | Dark-mode Web Dashboard with live stream, criteria matrix, and diff inspector. |
-| **`extension/`** | [`extension/`](extension/) | VS Code Extension with Activity Bar sidebar and OS Keychain credential storage. |
+The backend binds to `127.0.0.1` only and has no login. It accepts a request only when:
 
----
+- the `Host` header is this machine (`127.0.0.1`, `localhost` or `[::1]` on the server's port), which stops DNS rebinding;
+- a browser request comes from the dashboard's own origin, and a POST is `application/json`, so other websites cannot drive the API;
+- the body is at most 1 MB.
 
-## Web Dashboard Features
-
-* **Live Execution Timeline:** Watch coding agents execute tools in real time. Allowed actions display green badges; blocked actions display red badges (`Exit Code 2`) with the exact policy violation reason.
-* **Socratic Product Wizard (Agent 3):**
-  * Type a feature idea (e.g. *"Add Google OAuth login"*).
-  * Agent 3 asks 2–3 targeted product decisions (session lifetimes, account collision handling, edge cases).
-  * Select your answers and click **Lock Specification** to anchor the coding agent to a deterministic contract.
-* **Two-Tier Verification Board:** View compiler/typecheck ground truth, unit test results, and criteria verification cards backed by exact line-number citations.
-* **Delta Diff & Risk Inspector:** Line-by-line diff inspector with symbol blast radius, dependency drift warnings, and interactive Socratic comprehension questions ("Grill Me" mode).
-
----
+It sends no CORS headers. Requests with no `Origin` (the extension, `curl`) are allowed, because any local process can already reach a local port.
 
 ## Quickstart
 
-### 1. Launch the Platform Server & Web Dashboard
+Requires Node 22.18 or newer (Node 24 recommended). Node runs the TypeScript sources directly.
 
 ```bash
-cd agentdock-platform
+npm ci
 node backend/src/server.ts
 ```
 
-Open your browser to:
-```
-http://localhost:45820
-```
+Then open <http://127.0.0.1:45820>.
 
-The backend automatically serves the interactive dashboard and WebSocket stream simultaneously!
-
----
-
-### 2. VS Code Extension Setup
-
-The extension is located in [`extension/`](extension/). It integrates into the VS Code Activity Bar:
-* Uses `vscode.SecretStorage` to store Gemini and Claude API keys in your operating system keychain (Windows Credential Manager / macOS Keychain).
-* Opens the Socratic Product Guide directly inside the VS Code sidebar.
-
----
-
-## Automated Test Suite
-
-Run all tests across `backend/`, `frontend/`, and `extension/`:
+## Development
 
 ```bash
-node --test backend/tests/**/*.test.ts frontend/tests/**/*.test.ts extension/tests/**/*.test.ts
+make ci          # every gate CI runs
+make lint        # ESLint + Prettier check
+make hygiene     # repo rules
+make typecheck
+make test
 ```
 
-Output:
-```
-✔ 7/7 tests passing (Duration: ~0.22s)
-```
-
----
+Known bugs and open items: [`ISSUE.md`](ISSUE.md).
 
 ## License
 
-MIT © [Ankit Tiwari](https://github.com/ankit-tiwari-dev)
-
+No license has been chosen yet (`ISSUE.md` → I-8).
