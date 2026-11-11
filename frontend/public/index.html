@@ -43,7 +43,7 @@
     <div class="flex items-center space-x-4">
       <div class="flex items-center space-x-2 text-xs bg-dark-700/60 px-3 py-1.5 rounded-lg border border-dark-600">
         <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" id="wsIndicator"></span>
-        <span id="wsStatus" class="text-gray-300 font-medium">Daemon Connected</span>
+        <span id="wsStatus" class="text-gray-300 font-medium">Backend connected</span>
       </div>
       <div class="text-xs px-2.5 py-1 rounded bg-dark-700 text-gray-300 border border-dark-600 font-mono">
         Active: Claude Code
@@ -83,7 +83,7 @@
         <div class="bg-dark-800 border border-dark-700 rounded-xl p-5 shadow-sm">
           <div class="text-xs font-medium text-gray-400 uppercase tracking-wider">Token Spend & Cost</div>
           <div class="text-2xl font-bold text-indigo-400 mt-2" id="statTokenCost">$0.0418</div>
-          <div class="text-xs text-gray-400 mt-1">18,420 tokens (Mission-Control tracker)</div>
+          <div class="text-xs text-gray-400 mt-1">18,420 tokens (sample data)</div>
         </div>
         <div class="bg-dark-800 border border-dark-700 rounded-xl p-5 shadow-sm">
           <div class="text-xs font-medium text-gray-400 uppercase tracking-wider">Blocked Actions</div>
@@ -153,7 +153,7 @@
       </div>
     </section>
 
-    <!-- 2.5 Prompt Coach Tab (adapted from aGiTrack) -->
+    <!-- 2.5 Prompt Coach Tab -->
     <section id="view-coach" class="hidden space-y-6 max-w-3xl">
       <div class="bg-dark-800 border border-dark-700 rounded-xl p-6">
         <div class="flex items-center gap-3 mb-4">
@@ -385,7 +385,7 @@
         const ws = new WebSocket(wsUrl);
         ws.onopen = () => {
           document.getElementById('wsIndicator').className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
-          document.getElementById('wsStatus').innerText = 'Daemon Connected';
+          document.getElementById('wsStatus').innerText = 'Backend connected';
         };
         ws.onmessage = (event) => {
           const msg = JSON.parse(event.data);
@@ -410,16 +410,22 @@
       const container = document.getElementById('timelineContainer');
       const item = document.createElement('div');
       item.className = 'bg-dark-800 border border-dark-700 rounded-lg p-4 flex items-start justify-between animate-fadeIn';
-      item.innerHTML = `
-        <div class="flex items-start space-x-3">
-          <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">${msg.type}</span>
-          <div>
-            <div class="text-sm font-medium text-white">${JSON.stringify(msg.data)}</div>
-            <div class="text-xs text-gray-500 mt-0.5 font-mono">${new Date(msg.timestamp).toLocaleTimeString()}</div>
-          </div>
-        </div>
-      `;
+      // Event data comes from whoever posted it, so it is only ever set as text, never parsed as HTML.
+      const row = el('div', 'flex items-start space-x-3');
+      row.appendChild(el('span', 'px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30', String(msg.type)));
+      const body = el('div', '');
+      body.appendChild(el('div', 'text-sm font-medium text-white', JSON.stringify(msg.data)));
+      body.appendChild(el('div', 'text-xs text-gray-500 mt-0.5 font-mono', new Date(msg.timestamp).toLocaleTimeString()));
+      row.appendChild(body);
+      item.appendChild(row);
       container.prepend(item);
+    }
+
+    function el(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
     }
 
     // Socratic Product Interview API Calls
@@ -455,18 +461,21 @@
       questions.forEach((q, idx) => {
         const div = document.createElement('div');
         div.className = 'bg-dark-900 p-4 rounded-lg border border-dark-600';
-        div.innerHTML = `
-          <div class="text-xs font-semibold text-purple-400 mb-1">Question ${idx + 1}: ${q.question}</div>
-          <div class="text-[11px] text-gray-400 mb-2">${q.whyItMatters}</div>
-          <div class="space-y-1.5 text-xs">
-            ${q.suggestedAnswers.map((ans, aIdx) => `
-              <label class="flex items-center space-x-2 text-gray-300 p-1.5 rounded hover:bg-dark-800 cursor-pointer">
-                <input type="radio" name="ans_${q.id}" value="${ans}" ${aIdx === 0 ? 'checked' : ''} class="text-indigo-600">
-                <span>${ans}</span>
-              </label>
-            `).join('')}
-          </div>
-        `;
+        div.appendChild(el('div', 'text-xs font-semibold text-purple-400 mb-1', `Question ${idx + 1}: ${q.question}`));
+        div.appendChild(el('div', 'text-[11px] text-gray-400 mb-2', q.whyItMatters));
+        const answers = el('div', 'space-y-1.5 text-xs');
+        q.suggestedAnswers.forEach((ans, aIdx) => {
+          const label = el('label', 'flex items-center space-x-2 text-gray-300 p-1.5 rounded hover:bg-dark-800 cursor-pointer');
+          const input = el('input', 'text-indigo-600');
+          input.type = 'radio';
+          input.name = `ans_${q.id}`;
+          input.value = ans;
+          input.checked = aIdx === 0;
+          label.appendChild(input);
+          label.appendChild(el('span', '', ans));
+          answers.appendChild(label);
+        });
+        div.appendChild(answers);
         container.appendChild(div);
       });
       document.getElementById('clarificationBox').classList.remove('hidden');
@@ -476,7 +485,7 @@
       const prompt = document.getElementById('wizardPromptInput').value;
       const answers = {};
       currentQuestions.forEach(q => {
-        const selected = document.querySelector(`input[name="ans_${q.id}"]:checked`);
+        const selected = document.querySelector(`input[name="ans_${CSS.escape(q.id)}"]:checked`);
         if (selected) answers[q.id] = selected.value;
       });
 
