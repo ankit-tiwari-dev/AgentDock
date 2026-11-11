@@ -52,7 +52,9 @@ export class CodexRoleService {
     const executable = process.env.AGENTDOCK_CODEX_PATH || (process.platform === "win32" ? "codex.exe" : "codex");
     try {
       await new Promise<void>((resolve, reject) => {
-        const child = spawn(executable, ["exec", "--ephemeral", "--sandbox", "read-only", "--cd", this.projectPath, "--output-schema", schemaPath, "--output-last-message", outputPath, "-"], { windowsHide: true, stdio: ["pipe", "ignore", "pipe"] });
+        const home = process.env.HOME || process.env.USERPROFILE;
+        const codexHome = process.env.CODEX_HOME || (home ? join(home, ".codex") : undefined);
+        const child = spawn(executable, ["exec", "--ephemeral", "--sandbox", "read-only", "--cd", this.projectPath, "--output-schema", schemaPath, "--output-last-message", outputPath, "-"], { windowsHide: true, stdio: ["pipe", "ignore", "pipe"], env: { ...process.env, ...(home ? { HOME: home } : {}), ...(codexHome ? { CODEX_HOME: codexHome } : {}) } });
         let stderr = "";
         const timeout = setTimeout(() => { child.kill(); reject(new Error("Codex role timed out after 3 minutes.")); }, 180_000);
         child.stderr.on("data", (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-6000); });
