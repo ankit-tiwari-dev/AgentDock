@@ -17,7 +17,7 @@
     "scripts/**/*",
     "backend/src/**/*",
     "backend/tests/**/*",
-    "frontend/src/**/*",
+    "frontend/src/**/*.ts",
     "frontend/tests/**/*",
     "extension/src/**/*",
     "extension/tests/**/*"

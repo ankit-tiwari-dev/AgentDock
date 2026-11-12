@@ -6,11 +6,19 @@ import { WebSocketBroadcaster } from "./websocket-server.ts";
 import { SupervisorService } from "./supervisor-service.ts";
 import { evaluatePromptQuality } from "./prompt-coach.ts";
 import { calculateTurnCost } from "./token-pricing.ts";
-import { DashboardStore } from "./dashboard-store.ts";
+import { AuditReader, type DashboardEvent } from "./audit-reader.ts";
 import { CodexRoleService } from "./codex-role-service.ts";
 import type { SupervisorInterviewRequest, TrajectoryLoopCheckRequest, WSEventMessage } from "./types.ts";
 
 const MAX_BODY_BYTES = 1024 * 1024;
+const POLL_INTERVAL_MS = 1000;
+
+/** The dashboard refreshes when it sees one of these types. */
+function streamType(event: DashboardEvent): WSEventMessage["type"] {
+  if (event.hookEventName === "PreToolUse") return "agent_tool_executing";
+  if (event.hookEventName === "PostToolUse") return "agent_tool_completed";
+  return "agent_session_updated";
+}
 
 export interface ServerConfig {
   port?: number;
@@ -22,7 +30,8 @@ export class AgentDockBackendServer {
   private server;
   private broadcaster: WebSocketBroadcaster;
   private supervisor: SupervisorService;
-  private dashboard: DashboardStore;
+  private audit: AuditReader;
+  private pollTimer: ReturnType<typeof setInterval> | undefined;
   private codexRoles: CodexRoleService;
   private port: number;
   private host: string;
@@ -32,8 +41,9 @@ export class AgentDockBackendServer {
     this.host = config?.host ?? "127.0.0.1";
     this.broadcaster = new WebSocketBroadcaster();
     this.supervisor = new SupervisorService();
-    this.dashboard = new DashboardStore();
-    this.codexRoles = new CodexRoleService(config?.projectPath ?? process.cwd());
+    const projectPath = config?.projectPath ?? process.cwd();
+    this.audit = new AuditReader(projectPath);
+    this.codexRoles = new CodexRoleService(projectPath);
 
     this.server = createServer((req, res) => {
       this.handleHttpRequest(req, res);
@@ -64,6 +74,7 @@ export class AgentDockBackendServer {
         const addr = this.server.address();
         if (typeof addr === "object" && addr !== null) {
           this.port = addr.port;
+          this.startPolling();
           resolve({ host: this.host, port: this.port });
         } else {
           reject(new Error("Failed to get backend server address"));
@@ -77,10 +88,30 @@ export class AgentDockBackendServer {
   }
 
   public async stop(): Promise<void> {
+    clearInterval(this.pollTimer);
+    this.audit.close();
     this.broadcaster.closeAll();
     return new Promise((resolve) => {
       this.server.close(() => resolve());
     });
+  }
+
+  public getAuditReader(): AuditReader {
+    return this.audit;
+  }
+
+  /** Streams every event the daemon has written since the last tick to the connected dashboards. */
+  private startPolling(): void {
+    this.pollTimer = setInterval(() => this.broadcastNewAuditEvents(), POLL_INTERVAL_MS);
+    this.pollTimer.unref();
+  }
+
+  public broadcastNewAuditEvents(): number {
+    const fresh = this.audit.poll();
+    for (const event of fresh) {
+      this.broadcaster.broadcast({ type: streamType(event), sessionId: event.sessionId, timestamp: event.timestamp, data: { ...event } });
+    }
+    return fresh.length;
   }
 
   /** Only this machine's own names, so a DNS name rebound to 127.0.0.1 is refused. */
@@ -133,7 +164,7 @@ export class AgentDockBackendServer {
     }
 
     if (req.method === "GET" && pathname === "/api/dashboard/state") {
-      this.sendJson(res, 200, this.dashboard.snapshot());
+      this.sendJson(res, 200, this.audit.snapshot());
       return;
     }
 
@@ -197,19 +228,8 @@ export class AgentDockBackendServer {
           return;
         }
 
-        let stored = false;
-        try {
-          stored = !!this.dashboard.ingest(event);
-        } catch (error) {
-          this.sendJson(res, 500, { error: `Could not persist dashboard event: ${String(error)}` });
-          return;
-        }
         this.broadcaster.broadcast(event);
-        this.sendJson(res, 200, {
-          success: true,
-          stored: !!stored,
-          broadcastedTo: this.broadcaster.getConnectedClientsCount(),
-        });
+        this.sendJson(res, 200, { success: true, broadcastedTo: this.broadcaster.getConnectedClientsCount() });
       });
       return;
     }
@@ -336,11 +356,14 @@ export class AgentDockBackendServer {
 
 // Standalone runner if executed directly
 if (process.argv[1]?.endsWith("server.ts") || process.argv[1]?.endsWith("server.js")) {
-  const server = new AgentDockBackendServer({ port: 45820 });
+  const flag = process.argv.indexOf("--project");
+  const projectPath = resolve(flag > -1 && process.argv[flag + 1] ? process.argv[flag + 1] : (process.env.AGENTDOCK_PROJECT ?? "."));
+  const server = new AgentDockBackendServer({ port: 45820, projectPath });
   server
     .start()
     .then(({ host, port }) => {
       console.log(`AgentDock Backend running at http://${host}:${port}`);
+      console.log(`Reading the audit log of ${projectPath} (${server.getAuditReader().databasePath})`);
       console.log(`WebSocket event stream ready at ws://${host}:${port}/ws/events`);
     })
     .catch((err: unknown) => {
