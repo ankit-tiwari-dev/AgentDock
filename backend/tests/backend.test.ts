@@ -114,7 +114,7 @@ function createMockHttpPair(options: MockHttpHandlerOptions) {
   const req = {
     method: options.method,
     url: options.url,
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", host: "127.0.0.1:45820" },
     on(event: string, callback: (chunk?: Buffer) => void) {
       if (event === "data" && options.body !== undefined) {
         const payload = typeof options.body === "string" ? options.body : JSON.stringify(options.body);

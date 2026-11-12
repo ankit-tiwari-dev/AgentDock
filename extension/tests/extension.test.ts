@@ -50,9 +50,9 @@ test("SidebarProvider generates HTML and dispatches messages", async () => {
   assert.ok(html.includes("AI Model Configuration"));
 
   // 2. Test message dispatch: ready
-  let dispatchedMsg: any = null;
+  let dispatchedMsg = null as Record<string, unknown> | null;
   await provider.handleMessage({ type: "ready" }, (msg) => {
-    dispatchedMsg = msg;
+    dispatchedMsg = msg as Record<string, unknown>;
   });
 
   assert.equal(dispatchedMsg?.type, "status_update");
@@ -60,14 +60,10 @@ test("SidebarProvider generates HTML and dispatches messages", async () => {
   assert.equal(dispatchedMsg?.backendPort, 45820);
 
   // 3. Test message dispatch: save_api_key
-  await provider.handleMessage(
-    { type: "save_api_key", provider: "gemini", key: "sk-gemini-new-key-123" },
-    (msg) => {
-      dispatchedMsg = msg;
-    }
-  );
+  await provider.handleMessage({ type: "save_api_key", provider: "gemini", key: "sk-gemini-new-key-123" }, (msg) => {
+    dispatchedMsg = msg as Record<string, unknown>;
+  });
 
   assert.equal(dispatchedMsg?.type, "key_saved");
   assert.equal(await manager.getGeminiKey(), "sk-gemini-new-key-123");
 });
-

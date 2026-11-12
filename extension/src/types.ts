@@ -17,4 +17,3 @@ export type WebviewMessage =
   | { type: "run_verification" }
   | { type: "open_browser_dashboard" }
   | { type: "save_api_key"; provider: "gemini" | "claude"; key: string };
-

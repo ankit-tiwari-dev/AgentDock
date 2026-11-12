@@ -12,6 +12,8 @@ export interface SessionSummary {
 export interface WSEventMessage {
   type:
     | "agent_tool_executing"
+    | "agent_tool_completed"
+    | "agent_session_updated"
     | "policy_verdict_emitted"
     | "circuit_breaker_alert"
     | "spec_updated"
@@ -57,4 +59,3 @@ export interface TrajectoryLoopCheckResponse {
   recommendation: "CONTINUE" | "WARN_AGENT" | "HALT_FOR_DEVELOPER";
   message: string;
 }
-

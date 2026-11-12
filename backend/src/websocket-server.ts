@@ -55,6 +55,12 @@ export class WebSocketBroadcaster {
     }
   }
 
+  /** Closes every client so the HTTP server can shut down. */
+  public closeAll(): void {
+    for (const client of this.clients) client.destroy();
+    this.clients.clear();
+  }
+
   public getConnectedClientsCount(): number {
     return this.clients.size;
   }
@@ -83,4 +89,3 @@ export class WebSocketBroadcaster {
     return Buffer.concat([header, payload]);
   }
 }
-

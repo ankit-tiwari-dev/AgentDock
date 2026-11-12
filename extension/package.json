@@ -61,7 +61,11 @@
         "agentdock.modelProvider": {
           "type": "string",
           "default": "gemini",
-          "enum": ["gemini", "claude", "ollama"],
+          "enum": [
+            "gemini",
+            "claude",
+            "ollama"
+          ],
           "description": "AI provider used by Agent 3 (Supervisor AI)"
         },
         "agentdock.modelName": {
@@ -81,4 +85,3 @@
     "test": "node --test tests/**/*.test.ts"
   }
 }
-

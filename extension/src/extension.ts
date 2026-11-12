@@ -1,9 +1,10 @@
 import { SecretManager } from "./secret-manager.ts";
+import type { SecretStorageLike } from "./types.ts";
 import { AgentDockSidebarProvider } from "./sidebar-provider.ts";
 
 export interface ExtensionContextLike {
-  secrets: any;
-  subscriptions: Array<{ dispose(): any }>;
+  secrets: SecretStorageLike;
+  subscriptions: Array<{ dispose(): unknown }>;
 }
 
 export function activateExtension(context: ExtensionContextLike): {
@@ -15,4 +16,3 @@ export function activateExtension(context: ExtensionContextLike): {
 
   return { secretManager, sidebarProvider };
 }
-
