@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   checks:
-    name: lint, format, typecheck, hygiene, workflow lint
+    name: lint, format, typecheck, build, hygiene, workflow lint
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -30,6 +30,10 @@ jobs:
       - run: npm run lint
       - run: npm run format:check
       - run: npm run typecheck
+      - name: build the dashboard (also type-checks the .tsx files)
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
       - run: npm run hygiene
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:

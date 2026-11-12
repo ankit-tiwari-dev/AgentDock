@@ -4,7 +4,7 @@ import prettier from "eslint-config-prettier";
 import globals from "globals";
 
 export default tseslint.config(
-  { ignores: ["node_modules/**", "**/*.vsix"] },
+  { ignores: ["node_modules/**", "**/*.vsix", "**/.next/**", "**/out/**", "frontend/next-env.d.ts"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -18,6 +18,11 @@ export default tseslint.config(
       "@typescript-eslint/consistent-type-imports": ["error", { fixStyle: "inline-type-imports" }],
       eqeqeq: ["error", "always", { null: "ignore" }],
     },
+  },
+  {
+    // The dashboard runs in the browser.
+    files: ["frontend/src/**/*.tsx", "frontend/src/**/*.ts"],
+    languageOptions: { globals: { ...globals.browser } },
   },
   prettier,
 );

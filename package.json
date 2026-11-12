@@ -11,6 +11,7 @@
   ],
   "scripts": {
     "start:backend": "node backend/src/server.ts",
+    "build": "npm run build --workspace frontend",
     "test": "node --test --test-timeout=60000 backend/tests/*.test.ts frontend/tests/*.test.ts extension/tests/*.test.ts scripts/tests/*.test.ts",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint .",
