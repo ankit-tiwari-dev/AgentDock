@@ -36,7 +36,8 @@ test("regression: the webview has a Content Security Policy that only runs its o
   assert.match(csp[1], /default-src 'none'/);
   const nonce = /script-src 'nonce-([A-Za-z0-9+/=]+)'/.exec(csp[1])?.[1];
   assert.ok(nonce, "script-src must use a nonce");
-  const scripts = [...html.matchAll(/<script([^>]*)>/g)].map((m) => m[1]);
+  // Case-insensitive: a browser runs <SCRIPT> just the same.
+  const scripts = [...html.matchAll(/<script\b([^>]*)>/gi)].map((m) => m[1]);
   assert.deepEqual(scripts, [` nonce="${nonce}"`]);
   // Inline handlers are blocked by that policy, so the page must not depend on them.
   assert.equal(/\son[a-z]+="/i.test(html), false);
