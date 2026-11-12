@@ -1,11 +1,13 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { extname, join, relative, resolve, sep } from "node:path";
 import { WebSocketBroadcaster } from "./websocket-server.ts";
 import { SupervisorService } from "./supervisor-service.ts";
 import { evaluatePromptQuality } from "./prompt-coach.ts";
 import { calculateTurnCost } from "./token-pricing.ts";
+import { DashboardStore } from "./dashboard-store.ts";
+import { CodexRoleService } from "./codex-role-service.ts";
 import type { SupervisorInterviewRequest, TrajectoryLoopCheckRequest, WSEventMessage } from "./types.ts";
 
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -20,6 +22,8 @@ export class AgentDockBackendServer {
   private server;
   private broadcaster: WebSocketBroadcaster;
   private supervisor: SupervisorService;
+  private dashboard: DashboardStore;
+  private codexRoles: CodexRoleService;
   private port: number;
   private host: string;
 
@@ -28,6 +32,8 @@ export class AgentDockBackendServer {
     this.host = config?.host ?? "127.0.0.1";
     this.broadcaster = new WebSocketBroadcaster();
     this.supervisor = new SupervisorService();
+    this.dashboard = new DashboardStore();
+    this.codexRoles = new CodexRoleService(config?.projectPath ?? process.cwd());
 
     this.server = createServer((req, res) => {
       this.handleHttpRequest(req, res);
@@ -126,6 +132,11 @@ export class AgentDockBackendServer {
       return;
     }
 
+    if (req.method === "GET" && pathname === "/api/dashboard/state") {
+      this.sendJson(res, 200, this.dashboard.snapshot());
+      return;
+    }
+
     // 3. Supervisor Socratic Interview Endpoint
     if (req.method === "POST" && pathname === "/api/supervisor/interview") {
       this.readJsonBody<SupervisorInterviewRequest>(req, res, (body) => {
@@ -134,24 +145,19 @@ export class AgentDockBackendServer {
           return;
         }
 
-        const interviewResult = this.supervisor.conductInterview(body);
-
-        // Broadcast spec lock event if refined
-        if (interviewResult.isRefined && interviewResult.lockedSpecification) {
-          this.broadcaster.broadcast({
-            type: "spec_updated",
-            sessionId: "active_session",
-            timestamp: Date.now(),
-            data: {
-              title: interviewResult.lockedSpecification.title,
-              specHash: interviewResult.lockedSpecification.specHash,
-              criteriaCount: interviewResult.lockedSpecification.acceptanceCriteria.length,
-            },
-          });
-        }
-
-        this.sendJson(res, 200, interviewResult);
+        void this.codexRoles.interview(body.featurePrompt, body.developerAnswers).then((interviewResult) => {
+          if (interviewResult.isRefined && interviewResult.lockedSpecification) {
+            this.broadcaster.broadcast({ type: "spec_updated", sessionId: "active_session", timestamp: Date.now(), data: { title: interviewResult.lockedSpecification.title, specHash: interviewResult.lockedSpecification.specHash, criteriaCount: interviewResult.lockedSpecification.acceptanceCriteria.length } });
+          }
+          this.sendJson(res, 200, interviewResult);
+        }).catch((error: unknown) => this.sendJson(res, 503, { error: error instanceof Error ? error.message : String(error) }));
       });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/reviewer/explain") {
+      void this.codexRoles.review().then((result) => this.sendJson(res, 200, result))
+        .catch((error: unknown) => this.sendJson(res, 503, { error: error instanceof Error ? error.message : String(error) }));
       return;
     }
 
@@ -191,8 +197,19 @@ export class AgentDockBackendServer {
           return;
         }
 
+        let stored = false;
+        try {
+          stored = !!this.dashboard.ingest(event);
+        } catch (error) {
+          this.sendJson(res, 500, { error: `Could not persist dashboard event: ${String(error)}` });
+          return;
+        }
         this.broadcaster.broadcast(event);
-        this.sendJson(res, 200, { success: true, broadcastedTo: this.broadcaster.getConnectedClientsCount() });
+        this.sendJson(res, 200, {
+          success: true,
+          stored: !!stored,
+          broadcastedTo: this.broadcaster.getConnectedClientsCount(),
+        });
       });
       return;
     }
@@ -228,17 +245,39 @@ export class AgentDockBackendServer {
 
     // 8. Serve Web Dashboard Frontend
     if (req.method === "GET" && (pathname === "/" || pathname === "/index.html" || !pathname.startsWith("/api/"))) {
-      const candidates = [
-        join(process.cwd(), "frontend", "public", "index.html"),
-        join(process.cwd(), "..", "frontend", "public", "index.html"),
-        join(import.meta.dirname, "..", "..", "frontend", "public", "index.html"),
+      const exportRoots = [
+        join(process.cwd(), "frontend", "out"),
+        join(process.cwd(), "..", "frontend", "out"),
+        join(import.meta.dirname, "..", "..", "frontend", "out"),
       ];
-      const resolved = candidates.find((p) => existsSync(p));
-
-      if (resolved) {
-        const html = readFileSync(resolved, "utf8");
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(html);
+      const decodedPath = decodeURIComponent(pathname);
+      for (const root of exportRoots) {
+        const candidate = resolve(root, `.${decodedPath}`);
+        const fromRoot = relative(resolve(root), candidate);
+        if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`)) continue;
+        const fileCandidates = [candidate, join(candidate, "index.html")];
+        const file = fileCandidates.find((path) => existsSync(path) && statSync(path).isFile());
+        if (!file) continue;
+        const types: Record<string, string> = {
+          ".html": "text/html; charset=utf-8",
+          ".js": "text/javascript; charset=utf-8",
+          ".css": "text/css; charset=utf-8",
+          ".json": "application/json; charset=utf-8",
+          ".svg": "image/svg+xml",
+          ".png": "image/png",
+          ".jpg": "image/jpeg",
+          ".webp": "image/webp",
+          ".ico": "image/x-icon",
+          ".woff": "font/woff",
+          ".woff2": "font/woff2",
+        };
+        res.writeHead(200, { "Content-Type": types[extname(file)] ?? "application/octet-stream" });
+        res.end(readFileSync(file));
+        return;
+      }
+      if (pathname === "/" || pathname === "/index.html") {
+        res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("Next.js frontend export is missing. Run npm run build --workspace frontend, then restart the backend.");
         return;
       }
     }
