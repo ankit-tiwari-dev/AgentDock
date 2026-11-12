@@ -1,12 +1,12 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { extname, join, relative, resolve, sep } from "node:path";
+import { join, resolve } from "node:path";
 import { WebSocketBroadcaster } from "./websocket-server.ts";
 import { SupervisorService } from "./supervisor-service.ts";
 import { evaluatePromptQuality } from "./prompt-coach.ts";
 import { calculateTurnCost } from "./token-pricing.ts";
 import { AuditReader, type DashboardEvent } from "./audit-reader.ts";
+import { contentSecurityPolicy, contentType, decodePath, findExportFile } from "./static-files.ts";
 import { CodexRoleService } from "./codex-role-service.ts";
 import type { SupervisorInterviewRequest, TrajectoryLoopCheckRequest, WSEventMessage } from "./types.ts";
 
@@ -26,6 +26,8 @@ export interface ServerConfig {
   projectPath?: string;
   /** Lets the guide and the explainer run Codex CLI. Off unless AGENTDOCK_CODEX=1, because each run calls a paid model. */
   codexEnabled?: boolean;
+  /** The Next.js export to serve. Defaults to `frontend/out` next to the backend or the working folder. */
+  staticRoot?: string;
   /** Replaces the Codex runner, for tests. */
   codexRoles?: Pick<CodexRoleService, "interview" | "review">;
 }
@@ -42,6 +44,7 @@ export class AgentDockBackendServer {
   private codexRoles: Pick<CodexRoleService, "interview" | "review">;
   private codexEnabled: boolean;
   private codexBusy = false;
+  private staticRoots: string[];
   private port: number;
   private host: string;
 
@@ -54,6 +57,13 @@ export class AgentDockBackendServer {
     this.audit = new AuditReader(projectPath);
     this.codexRoles = config?.codexRoles ?? new CodexRoleService(projectPath);
     this.codexEnabled = config?.codexEnabled ?? process.env.AGENTDOCK_CODEX === "1";
+    this.staticRoots = config?.staticRoot
+      ? [config.staticRoot]
+      : [
+          join(process.cwd(), "frontend", "out"),
+          join(process.cwd(), "..", "frontend", "out"),
+          join(import.meta.dirname, "..", "..", "frontend", "out"),
+        ];
 
     this.server = createServer((req, res) => {
       this.handleHttpRequest(req, res);
@@ -292,46 +302,40 @@ export class AgentDockBackendServer {
     }
 
     // 8. Serve Web Dashboard Frontend
-    if (req.method === "GET" && (pathname === "/" || pathname === "/index.html" || !pathname.startsWith("/api/"))) {
-      const exportRoots = [
-        join(process.cwd(), "frontend", "out"),
-        join(process.cwd(), "..", "frontend", "out"),
-        join(import.meta.dirname, "..", "..", "frontend", "out"),
-      ];
-      const decodedPath = decodeURIComponent(pathname);
-      for (const root of exportRoots) {
-        const candidate = resolve(root, `.${decodedPath}`);
-        const fromRoot = relative(resolve(root), candidate);
-        if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`)) continue;
-        const fileCandidates = [candidate, join(candidate, "index.html")];
-        const file = fileCandidates.find((path) => existsSync(path) && statSync(path).isFile());
-        if (!file) continue;
-        const types: Record<string, string> = {
-          ".html": "text/html; charset=utf-8",
-          ".js": "text/javascript; charset=utf-8",
-          ".css": "text/css; charset=utf-8",
-          ".json": "application/json; charset=utf-8",
-          ".svg": "image/svg+xml",
-          ".png": "image/png",
-          ".jpg": "image/jpeg",
-          ".webp": "image/webp",
-          ".ico": "image/x-icon",
-          ".woff": "font/woff",
-          ".woff2": "font/woff2",
-        };
-        res.writeHead(200, { "Content-Type": types[extname(file)] ?? "application/octet-stream" });
-        res.end(readFileSync(file));
-        return;
-      }
-      if (pathname === "/" || pathname === "/index.html") {
-        res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
-        res.end("Next.js frontend export is missing. Run npm run build --workspace frontend, then restart the backend.");
-        return;
-      }
+    if (req.method === "GET" && !pathname.startsWith("/api/")) {
+      this.serveStatic(res, pathname);
+      return;
     }
 
     // Default 404
     this.sendJson(res, 404, { error: "Not Found", path: pathname });
+  }
+
+  private serveStatic(res: ServerResponse, pathname: string): void {
+    const decoded = decodePath(pathname);
+    if (decoded === undefined) {
+      this.sendJson(res, 400, { error: "Malformed URL" });
+      return;
+    }
+    const file = findExportFile(this.staticRoots, decoded);
+    if (!file) {
+      if (decoded === "/" || decoded === "/index.html") {
+        res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("The dashboard is not built yet. Run npm run build --workspace frontend, then restart the backend.");
+        return;
+      }
+      this.sendJson(res, 404, { error: "Not Found", path: pathname });
+      return;
+    }
+    const type = contentType(file.path);
+    const headers: Record<string, string> = { "Content-Type": type, "X-Content-Type-Options": "nosniff" };
+    if (type.startsWith("text/html")) {
+      headers["Content-Security-Policy"] = contentSecurityPolicy(file.body.toString("utf8"), this.port);
+      headers["Referrer-Policy"] = "no-referrer";
+      headers["Cache-Control"] = "no-cache";
+    }
+    res.writeHead(200, headers);
+    res.end(file.body);
   }
 
   /** One Codex run at a time: each one is a model session that costs money and can take minutes. */
