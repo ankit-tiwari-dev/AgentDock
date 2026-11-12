@@ -66,6 +66,8 @@ docker run --rm -p 127.0.0.1:45820:45820 -v /path/to/your/project:/project:ro ag
 
 On Windows, give the project as a Windows path, for example `-v "C:\code\my-app:/project:ro"`. Run the supervisor (`ctrlplane`) on the machine as usual; the container only reads the audit log it writes.
 
+On Linux the server runs as user ID 1000, so it needs read access to the project folder and its `.ctrlplane` files. Files the CLI creates are readable by everyone by default. If your folder is private, run the container as yourself: `docker run --user "$(id -u):$(id -g)" ...`, or add `user: "1001:1001"` (your IDs) to the service in `compose.yaml`.
+
 Keep these two parts of the command as they are:
 
 - **`127.0.0.1:` in front of the port.** Inside the container the backend has to listen on every address so Docker can forward the port. Without `127.0.0.1:`, Docker publishes the port on every network your machine is on, and the `Host` check below does not stop a client on the network, which can send any `Host` header.

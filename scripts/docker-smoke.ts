@@ -5,7 +5,7 @@
  * own files. Needs Docker with Compose v2. Run: npm run docker:smoke
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -59,7 +59,10 @@ function get(path: string, host = `127.0.0.1:${PORT}`): Promise<{ status: number
   });
 }
 
-type State = { events: Array<{ id: string; toolName?: string; ruleId?: string }> };
+type State = {
+  source: { available: boolean };
+  events: Array<{ id: string; toolName?: string; ruleId?: string }>;
+};
 
 async function eventIds(): Promise<string[]> {
   const { body } = await get("/api/dashboard/state");
@@ -67,7 +70,10 @@ async function eventIds(): Promise<string[]> {
 }
 
 const dir = mkdtempSync(join(tmpdir(), "agentdock-smoke-"));
-mkdirSync(join(dir, ".ctrlplane"));
+// mkdtemp makes the folder readable by its owner only. A project folder is normally readable by everyone, and on
+// Linux the container's user (uid 1000) is not the owner, so give the copy a project folder's usual mode.
+chmodSync(dir, 0o755);
+mkdirSync(join(dir, ".ctrlplane"), { mode: 0o755 });
 const db = new DatabaseSync(join(dir, ".ctrlplane", "audit.db"));
 db.exec(CLI_SCHEMA);
 const now = Date.now();
@@ -102,7 +108,7 @@ try {
   check(
     "the project's audit log is shown, with the rule that decided a call",
     state.events.length === 2 && state.events.some((e) => e.ruleId === "RULE-SMOKE"),
-    JSON.stringify(state.events.map((e) => [e.id, e.ruleId ?? null])),
+    `file found: ${state.source.available}, events: ${JSON.stringify(state.events.map((e) => [e.id, e.ruleId ?? null]))}`,
   );
 
   addEvent("ALLOW", null);
@@ -129,6 +135,13 @@ try {
 
   const uid = compose("exec", "-T", "agentdock", "id", "-u");
   check("the server runs as a non-root user", uid.code === 0 && uid.out !== "0", `uid ${uid.out}`);
+
+  // A failed write alone could be file permissions; the mount itself must be read-only.
+  const mounts = run("docker", ["inspect", "--format", "{{json .Mounts}}", id]).out;
+  const project = (JSON.parse(mounts || "[]") as Array<{ Destination: string; RW: boolean }>).find(
+    (m) => m.Destination === "/project",
+  );
+  check("the project is mounted read-only", project?.RW === false, mounts);
 
   const writeProject = compose("exec", "-T", "agentdock", "touch", "/project/written-by-container");
   check("the container cannot write to the project", writeProject.code !== 0, writeProject.out);
