@@ -31,3 +31,15 @@ Each entry: the decision, why, and what it rules out.
 **Why:** each run is a paid model session that reads the repository and can take minutes. A dashboard click, or a stray request, should not start one by default.
 
 **Rules out:** the code explainer working out of the box.
+
+## D-4 · In Docker, the port is published to 127.0.0.1 and the project is mounted read-only
+
+**Decision:** the image listens on `0.0.0.0` inside the container. `compose.yaml` and the README publish its port as `127.0.0.1:<port>:<port>` and mount the project as `/project:ro`. The backend accepts `AGENTDOCK_HOST` values `127.0.0.1`, `::1`, `0.0.0.0` and `::` only.
+
+**Why:**
+
+- Docker forwards a published port only to a server listening on the container's network address, so `127.0.0.1` inside the container cannot be reached at all. Publishing to `127.0.0.1` on the host keeps the result the same as running without Docker: only this machine can connect. The `Host` check (D-2) stops web pages, not a client on the network, which can send any `Host` header, so it cannot stand in for the binding.
+- A read-only mount is the only one that works. The CLI writes `audit.db` in SQLite's WAL mode, where readers and the writer share a memory-mapped `-shm` file. On Docker Desktop (Windows, Docker 29.8.2) a writable bind mount made every read fail with `disk I/O error`. Read-only, SQLite reads the WAL without that shared memory, and one long-lived connection saw every new row, through a checkpoint and a 2,000-row burst. `npm run docker:smoke` checks this on every pull request.
+- Refusing other `AGENTDOCK_HOST` values keeps a typo or a network card's address from putting the dashboard on the network outside Docker.
+
+**Rules out:** opening the dashboard from another machine; a published port that differs from the container's port (the `Host` check expects the server's own port, so `AGENTDOCK_PORT` sets both); Codex CLI inside the image. Linux and macOS hosts were not tested by hand; CI runs the smoke test on Linux.
