@@ -38,7 +38,9 @@ function post(port: number, path: string, body: unknown): Promise<{ status: numb
       (res) => {
         const parts: Buffer[] = [];
         res.on("data", (c: Buffer) => parts.push(c));
-        res.on("end", () => resolve({ status: res.statusCode ?? 0, json: JSON.parse(Buffer.concat(parts).toString()) }));
+        res.on("end", () =>
+          resolve({ status: res.statusCode ?? 0, json: JSON.parse(Buffer.concat(parts).toString()) }),
+        );
       },
     );
     req.on("error", reject);
@@ -46,7 +48,10 @@ function post(port: number, path: string, body: unknown): Promise<{ status: numb
   });
 }
 
-async function withServer(codexEnabled: boolean, fn: (port: number, fake: ReturnType<typeof fakeCodex>) => Promise<void>) {
+async function withServer(
+  codexEnabled: boolean,
+  fn: (port: number, fake: ReturnType<typeof fakeCodex>) => Promise<void>,
+) {
   const fake = fakeCodex();
   const server = new AgentDockBackendServer({ port: 0, codexEnabled, codexRoles: fake.service });
   const { port } = await server.start();

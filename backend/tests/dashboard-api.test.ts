@@ -18,14 +18,15 @@ function auditProject() {
       event_type TEXT NOT NULL, tool_name TEXT, tool_input_json TEXT, tool_output_json TEXT,
       is_blob_stored INTEGER NOT NULL DEFAULT 0, policy_verdict TEXT, policy_reason TEXT, execution_duration_ms INTEGER,
       created_at INTEGER NOT NULL);`);
-  db.prepare("INSERT INTO sessions VALUES ('s1', 'claude-code', ?, 'main', 'abc', NULL, NULL, 'active', ?, NULL, NULL)").run(
-    dir,
-    Date.now(),
-  );
+  db.prepare(
+    "INSERT INTO sessions VALUES ('s1', 'claude-code', ?, 'main', 'abc', NULL, NULL, 'active', ?, NULL, NULL)",
+  ).run(dir, Date.now());
   let seq = 0;
   const addEvent = (verdict: string) =>
     db
-      .prepare("INSERT INTO events VALUES (?, 's1', ?, 'pre_tool', 'Bash', '{\"command\":\"ls\"}', NULL, 0, ?, NULL, 3, ?)")
+      .prepare(
+        "INSERT INTO events VALUES (?, 's1', ?, 'pre_tool', 'Bash', '{\"command\":\"ls\"}', NULL, 0, ?, NULL, 3, ?)",
+      )
       .run(`evt_${++seq}`, seq, verdict, Date.now());
   return { dir, addEvent, cleanup: () => (db.close(), rmSync(dir, { recursive: true, force: true })) };
 }

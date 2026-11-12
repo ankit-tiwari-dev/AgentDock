@@ -35,7 +35,13 @@ export type DashboardSnapshot = {
   counts: { toolCalls: number; blockedCalls: number; reviewCalls: number; activeSessions: number; totalEvents: number };
 };
 
-export type RuleSummary = { id: string; count: number; latestDecision: string; latestReason: string; timestamp: number };
+export type RuleSummary = {
+  id: string;
+  count: number;
+  latestDecision: string;
+  latestReason: string;
+  timestamp: number;
+};
 
 export function eventStatus(event: DashboardEvent): string {
   if (event.hookEventName === "PostToolUse") return isToolFailure(event.toolOutput) ? "Failed" : "Completed";

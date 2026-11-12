@@ -143,7 +143,12 @@ export class AgentDockBackendServer {
   public broadcastNewAuditEvents(): number {
     const fresh = this.audit.poll();
     for (const event of fresh) {
-      this.broadcaster.broadcast({ type: streamType(event), sessionId: event.sessionId, timestamp: event.timestamp, data: { ...event } });
+      this.broadcaster.broadcast({
+        type: streamType(event),
+        sessionId: event.sessionId,
+        timestamp: event.timestamp,
+        data: { ...event },
+      });
     }
     return fresh.length;
   }
@@ -229,7 +234,10 @@ export class AgentDockBackendServer {
           return;
         }
 
-        const announce = (result: { isRefined: boolean; lockedSpecification?: { title: string; specHash: string; acceptanceCriteria: string[] } }) => {
+        const announce = (result: {
+          isRefined: boolean;
+          lockedSpecification?: { title: string; specHash: string; acceptanceCriteria: string[] };
+        }) => {
           if (result.isRefined && result.lockedSpecification) {
             this.broadcaster.broadcast({
               type: "spec_updated",
@@ -258,7 +266,11 @@ export class AgentDockBackendServer {
         this.sendJson(res, 503, { error: CODEX_OFF });
         return;
       }
-      this.runCodex(res, () => this.codexRoles.review(), (result) => this.sendJson(res, 200, result));
+      this.runCodex(
+        res,
+        () => this.codexRoles.review(),
+        (result) => this.sendJson(res, 200, result),
+      );
       return;
     }
 
@@ -379,7 +391,9 @@ export class AgentDockBackendServer {
     this.codexBusy = true;
     run()
       .then(done)
-      .catch((error: unknown) => this.sendJson(res, 503, { error: error instanceof Error ? error.message : String(error) }))
+      .catch((error: unknown) =>
+        this.sendJson(res, 503, { error: error instanceof Error ? error.message : String(error) }),
+      )
       .finally(() => {
         this.codexBusy = false;
       });
@@ -436,7 +450,9 @@ export class AgentDockBackendServer {
 // Standalone runner if executed directly
 if (process.argv[1]?.endsWith("server.ts") || process.argv[1]?.endsWith("server.js")) {
   const flag = process.argv.indexOf("--project");
-  const projectPath = resolve(flag > -1 && process.argv[flag + 1] ? process.argv[flag + 1] : (process.env.AGENTDOCK_PROJECT ?? "."));
+  const projectPath = resolve(
+    flag > -1 && process.argv[flag + 1] ? process.argv[flag + 1] : (process.env.AGENTDOCK_PROJECT ?? "."),
+  );
   const server = new AgentDockBackendServer({ port: 45820, projectPath });
   server
     .start()

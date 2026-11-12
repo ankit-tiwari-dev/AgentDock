@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { type DashboardEvent, eventStatus, isToolFailure, relativeTime, summarize, summarizeRules } from "../src/lib/events.ts";
+import {
+  type DashboardEvent,
+  eventStatus,
+  isToolFailure,
+  relativeTime,
+  summarize,
+  summarizeRules,
+} from "../src/lib/events.ts";
 
 const pre = (decision: string, reason: string, timestamp = 1, observedOnly = false): DashboardEvent => ({
   id: `${decision}-${timestamp}`,

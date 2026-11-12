@@ -55,7 +55,13 @@ test("the named dev origin may call the API and read the answer; no other origin
 test("only a plain http address on this machine can be named as the dev origin", () => {
   assert.equal(parseDevOrigin("http://localhost:3000"), "http://localhost:3000");
   assert.equal(parseDevOrigin("HTTP://127.0.0.1:3000"), "http://127.0.0.1:3000");
-  for (const bad of ["https://evil.example", "http://localhost.evil.example:3000", "*", "http://localhost:3000/", "null"]) {
+  for (const bad of [
+    "https://evil.example",
+    "http://localhost.evil.example:3000",
+    "*",
+    "http://localhost:3000/",
+    "null",
+  ]) {
     assert.equal(parseDevOrigin(bad), undefined, bad);
   }
 });
