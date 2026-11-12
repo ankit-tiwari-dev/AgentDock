@@ -28,8 +28,20 @@ export interface ServerConfig {
   codexEnabled?: boolean;
   /** The Next.js export to serve. Defaults to `frontend/out` next to the backend or the working folder. */
   staticRoot?: string;
+  /**
+   * The Next.js dev server's address (for example http://localhost:3000), allowed to call the API while you work on
+   * the dashboard. Off unless AGENTDOCK_DEV_ORIGIN is set; only a localhost or 127.0.0.1 address is accepted.
+   */
+  devOrigin?: string;
   /** Replaces the Codex runner, for tests. */
   codexRoles?: Pick<CodexRoleService, "interview" | "review">;
+}
+
+/** Only a plain http address on this machine may be named as the dev origin. */
+export function parseDevOrigin(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const origin = value.toLowerCase();
+  return /^http:\/\/(localhost|127\.0\.0\.1):\d{1,5}$/.test(origin) ? origin : undefined;
 }
 
 const CODEX_OFF =
@@ -45,6 +57,7 @@ export class AgentDockBackendServer {
   private codexEnabled: boolean;
   private codexBusy = false;
   private staticRoots: string[];
+  private devOrigin: string | undefined;
   private port: number;
   private host: string;
 
@@ -57,6 +70,7 @@ export class AgentDockBackendServer {
     this.audit = new AuditReader(projectPath);
     this.codexRoles = config?.codexRoles ?? new CodexRoleService(projectPath);
     this.codexEnabled = config?.codexEnabled ?? process.env.AGENTDOCK_CODEX === "1";
+    this.devOrigin = parseDevOrigin(config?.devOrigin ?? process.env.AGENTDOCK_DEV_ORIGIN);
     this.staticRoots = config?.staticRoot
       ? [config.staticRoot]
       : [
@@ -143,6 +157,7 @@ export class AgentDockBackendServer {
   /** No Origin means a non-browser client (the editor extension, curl). A browser must be on the dashboard itself. */
   private isAllowedOrigin(origin: string | undefined): boolean {
     if (origin === undefined) return true;
+    if (this.devOrigin !== undefined && origin.toLowerCase() === this.devOrigin) return true;
     return [`http://127.0.0.1:${this.port}`, `http://localhost:${this.port}`, `http://[::1]:${this.port}`].includes(
       origin.toLowerCase(),
     );
@@ -153,6 +168,23 @@ export class AgentDockBackendServer {
     // without them a browser stops other sites from reading any response.
     if (!this.isAllowedHost(req.headers.host)) {
       this.sendJson(res, 403, { error: "Forbidden host" });
+      return;
+    }
+    // The one exception to "no CORS": the dev server you named, so the page on its own port can read the answers.
+    const fromDevServer = this.devOrigin !== undefined && req.headers.origin?.toLowerCase() === this.devOrigin;
+    if (fromDevServer) {
+      res.setHeader("Access-Control-Allow-Origin", this.devOrigin!);
+      res.setHeader("Vary", "Origin");
+    }
+    if (req.method === "OPTIONS") {
+      if (!fromDevServer) {
+        this.sendJson(res, 403, { error: "Forbidden origin" });
+        return;
+      }
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+      res.writeHead(204);
+      res.end();
       return;
     }
     if (req.method === "POST") {
