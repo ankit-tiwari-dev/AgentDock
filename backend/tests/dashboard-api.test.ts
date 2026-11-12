@@ -25,7 +25,7 @@ function auditProject() {
   const addEvent = (verdict: string) =>
     db
       .prepare(
-        "INSERT INTO events VALUES (?, 's1', ?, 'pre_tool', 'Bash', '{\"command\":\"ls\"}', NULL, 0, ?, NULL, 3, ?)",
+        "INSERT INTO events (id, session_id, sequence_num, event_type, tool_name, tool_input_json, tool_output_json, is_blob_stored, policy_verdict, policy_reason, execution_duration_ms, created_at) VALUES (?, 's1', ?, 'pre_tool', 'Bash', '{\"command\":\"ls\"}', NULL, 0, ?, NULL, 3, ?)",
       )
       .run(`evt_${++seq}`, seq, verdict, Date.now());
   return { dir, addEvent, cleanup: () => (db.close(), rmSync(dir, { recursive: true, force: true })) };

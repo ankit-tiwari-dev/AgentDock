@@ -75,17 +75,18 @@ Status flow: FOUND → IN PROGRESS → FIXED. Each entry: symptoms, root cause, 
 - **Fix:** `decodePath` in `backend/src/static-files.ts` returns nothing for a bad escape or a NUL byte, and the server answers 400.
 - **Verification:** `backend/tests/static-serving.test.ts` → `regression: a malformed percent-escape gets 400 and the backend keeps running`. On the old code the request never got an answer and the process exited with code 1.
 
-## I-12 · FOUND · The audit log does not store which rule decided a tool call
+## I-12 · FIXED · The audit log did not store which rule decided a tool call
 
 - **Symptoms:** the dashboard shows "Matched rule: Not recorded", and the Policies tab groups decisions by the first line of their message instead of by rule.
 - **Root cause:** the `agentdock-cli` daemon computes `matchedRuleId` for its reply but does not write it to the `events` table, which has no column for it.
-- **Fix (proposed):** add a `rule_id` column in `agentdock-cli`, then read it here.
+- **Fix:** agentdock-cli now writes a `rule_id` column (its own ISSUE.md → I-54). `backend/src/audit-reader.ts` reads it when the column exists and selects `NULL` otherwise, checking on every read because the CLI may add the column while the backend runs. The Policies tab groups by rule ID when there is one.
+- **Verification:** `backend/tests/audit-reader.test.ts` → `the rule that decided a call is shown when the CLI stores it` (failed before the reader change); the older tests in that file use the table without the column and still pass. `frontend/tests/events.test.ts` → `when the audit log names the rule, decisions are grouped by rule ID`.
 
-## I-13 · FOUND · Hook calls made while the daemon is stopped never reach the dashboard
+## I-13 · FIXED · Hook calls made while the daemon was stopped never reached the dashboard
 
 - **Symptoms:** with the daemon stopped, the hooks still allow and deny (from local rules), but nothing appears on the dashboard.
 - **Root cause:** only the daemon writes `audit.db`; the hook's local fallback records nothing.
-- **Fix (proposed):** the dashboard already says where it reads from; the README tells you to run `ctrlplane start`. A real fix belongs in `agentdock-cli`.
+- **Fix:** in agentdock-cli (its ISSUE.md → I-55): with no daemon running, the hook writes the call to `audit.db` itself, as the daemon would. Nothing changes here; the dashboard reads those rows like any other. It needs an agentdock-cli version with that fix.
 
 ## I-14 · FOUND · The dashboard loads its fonts from Google
 

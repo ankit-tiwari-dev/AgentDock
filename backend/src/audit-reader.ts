@@ -21,6 +21,8 @@ export interface DashboardEvent {
   toolOutput?: unknown;
   decision?: string;
   reason?: string;
+  /** The rule that decided the call. Audit logs written before agentdock-cli stored it have none. */
+  ruleId?: string;
   observedOnly: boolean;
   latencyMs?: number;
 }
@@ -60,7 +62,7 @@ const IDLE_AFTER_MS = 5 * 60_000;
 const SNAPSHOT_LIMIT = 500;
 const POLL_LIMIT = 500;
 
-const EVENT_COLUMNS = `
+const BASE_EVENT_COLUMNS = `
   e.rowid AS row_id, e.id, e.session_id, e.event_type, e.tool_name, e.tool_input_json, e.tool_output_json,
   e.policy_verdict, e.policy_reason, e.execution_duration_ms, e.created_at, s.agent_type, s.project_path`;
 
@@ -101,6 +103,7 @@ export function toEvent(row: Row): DashboardEvent {
     toolOutput: parseJson(row.tool_output_json),
     decision,
     reason,
+    ruleId: str(row.rule_id),
     // The daemon records an observe-mode hit as an ALLOW whose reason says what it would have done.
     observedOnly: decision === "ALLOW" && (reason?.startsWith("Observe mode:") ?? false),
     latencyMs: latency === null || latency === undefined ? undefined : num(latency),
@@ -143,9 +146,18 @@ export class AuditReader {
     }
   }
 
+  /**
+   * The event columns to select. `rule_id` exists only in audit logs from newer agentdock-cli versions, and the CLI
+   * may add it while the backend runs, so it is looked up on every read. This connection is read-only and never adds it.
+   */
+  private eventColumns(): string {
+    const hasRuleId = this.query("PRAGMA table_info(events)").some((column) => column.name === "rule_id");
+    return `${BASE_EVENT_COLUMNS}, ${hasRuleId ? "e.rule_id" : "NULL"} AS rule_id`;
+  }
+
   public snapshot(now = Date.now()): DashboardSnapshot {
     const events = this.query(
-      `SELECT ${EVENT_COLUMNS} FROM events e LEFT JOIN sessions s ON s.id = e.session_id ORDER BY e.rowid DESC LIMIT ?`,
+      `SELECT ${this.eventColumns()} FROM events e LEFT JOIN sessions s ON s.id = e.session_id ORDER BY e.rowid DESC LIMIT ?`,
       SNAPSHOT_LIMIT,
     ).map(toEvent);
 
@@ -206,7 +218,7 @@ export class AuditReader {
       return [];
     }
     const rows = this.query(
-      `SELECT ${EVENT_COLUMNS} FROM events e LEFT JOIN sessions s ON s.id = e.session_id
+      `SELECT ${this.eventColumns()} FROM events e LEFT JOIN sessions s ON s.id = e.session_id
         WHERE e.rowid > ? ORDER BY e.rowid ASC LIMIT ?`,
       this.lastRowId,
       POLL_LIMIT,

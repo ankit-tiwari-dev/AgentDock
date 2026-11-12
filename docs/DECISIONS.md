@@ -8,11 +8,11 @@ Each entry: the decision, why, and what it rules out.
 
 **Why:**
 
-- Nothing is added to the hook's path. A hook runs before every tool call, so any network call there adds latency, and a hook that waits on a stalled connection can fail to print its verdict.
-- The audit log is already redacted and hash-chained. The dashboard shows exactly what `ctrlplane audit` shows, with no second copy to drift or leak.
+- No network call is added to the hook's path. A hook runs before every tool call, so a network call there adds latency, and a hook that waits on a stalled connection can fail to print its verdict. (While the daemon is stopped the hook writes the audit row itself, to a local file.)
+- The audit log is already redacted. The dashboard shows exactly what `ctrlplane audit` shows, with no second copy to drift or leak.
 - History survives a backend restart: the dashboard reads what was recorded while it was closed.
 
-**Rules out:** events from a hook whose daemon is stopped (`ISSUE.md` → I-13), and anything the audit log does not store, such as the matched rule ID (I-12).
+**Rules out:** anything the audit log does not store. It records calls made while the daemon is stopped and the rule behind each decision, but only from agentdock-cli versions that do (`ISSUE.md` → I-12, I-13); older logs have neither.
 
 ## D-2 · Host and Origin checks instead of a per-install token
 

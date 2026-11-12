@@ -64,3 +64,14 @@ test("long payloads are shortened and times read naturally", () => {
   assert.equal(relativeTime(0, 5_000), "Just now");
   assert.equal(relativeTime(0, 90_000), "1m ago");
 });
+
+test("when the audit log names the rule, decisions are grouped by rule ID", () => {
+  const rules = summarizeRules([
+    { ...pre("DENY", "Recursive delete of the home folder", 1), ruleId: "RULE-BLOCK-DESTRUCTIVE-SHELL" },
+    { ...pre("DENY", "Recursive delete of /etc", 2), ruleId: "RULE-BLOCK-DESTRUCTIVE-SHELL" },
+  ]);
+  assert.deepEqual(
+    rules.map((r) => [r.id, r.count, r.latestReason]),
+    [["RULE-BLOCK-DESTRUCTIVE-SHELL", 2, "Recursive delete of /etc"]],
+  );
+});

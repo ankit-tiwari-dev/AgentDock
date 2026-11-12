@@ -17,7 +17,7 @@ The supervisor itself (hooks, policy engine, audit trail, context packs) lives i
 
 ### Where the data comes from
 
-The backend reads `<project>/.ctrlplane/audit.db`, the file the `agentdock-cli` daemon writes on every hook call. It opens it read-only and checks for new rows once a second. Inputs and outputs were redacted by the CLI before they were stored. The daemon must be running for hook calls to be recorded (`ISSUE.md` → I-13). Why this design: [`docs/DECISIONS.md`](docs/DECISIONS.md) → D-1.
+The backend reads `<project>/.ctrlplane/audit.db`, the file `agentdock-cli` writes on every hook call (the daemon, or the hook itself while the daemon is stopped). It opens it read-only and checks for new rows once a second. Inputs and outputs were redacted by the CLI before they were stored. The rule that decided each call is shown when the CLI stores it; audit logs from older CLI versions show "Not recorded". Why this design: [`docs/DECISIONS.md`](docs/DECISIONS.md) → D-1.
 
 ## Quickstart
 

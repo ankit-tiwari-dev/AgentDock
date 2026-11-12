@@ -30,7 +30,9 @@ function project() {
   let seq = 0;
   const addEvent = (session: string, type: string, verdict: string | null, reason: string | null, at: number) =>
     writer
-      .prepare("INSERT INTO events VALUES (?, ?, ?, ?, 'Bash', ?, NULL, 0, ?, ?, 12, ?)")
+      .prepare(
+        "INSERT INTO events (id, session_id, sequence_num, event_type, tool_name, tool_input_json, tool_output_json, is_blob_stored, policy_verdict, policy_reason, execution_duration_ms, created_at) VALUES (?, ?, ?, ?, 'Bash', ?, NULL, 0, ?, ?, 12, ?)",
+      )
       .run(`evt_${++seq}`, session, seq, type, JSON.stringify({ command: `cmd ${seq}` }), verdict, reason, at);
   const addSession = (id: string, status: string, startedAt: number, endedAt: number | null = null) =>
     writer
@@ -159,5 +161,25 @@ test("history stays readable after the daemon has stopped and closed the databas
   } finally {
     reader.close();
     rmSync(p.dir, { recursive: true, force: true });
+  }
+});
+
+test("the rule that decided a call is shown when the CLI stores it", () => {
+  const p = project();
+  const reader = new AuditReader(p.dir);
+  try {
+    // Newer agentdock-cli versions add this column; older audit logs do not have it (the tests above).
+    p.writer.exec("ALTER TABLE events ADD COLUMN rule_id TEXT;");
+    p.addSession("s1", "active", 1);
+    p.addEvent("s1", "pre_tool", "DENY", "Recursive delete", 2);
+    p.writer.exec("UPDATE events SET rule_id = 'RULE-BLOCK-DESTRUCTIVE-SHELL'");
+    p.addEvent("s1", "pre_tool", "ALLOW", null, 3);
+    const [allowed, denied] = reader.snapshot().events;
+    assert.equal(denied.ruleId, "RULE-BLOCK-DESTRUCTIVE-SHELL");
+    assert.equal(allowed.ruleId, undefined);
+    assert.equal(reader.poll().length, 0);
+  } finally {
+    reader.close();
+    p.cleanup();
   }
 });
