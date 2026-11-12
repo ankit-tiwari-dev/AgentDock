@@ -44,6 +44,31 @@ export function parseDevOrigin(value: string | undefined): string | undefined {
   return /^http:\/\/(localhost|127\.0\.0\.1):\d{1,5}$/.test(origin) ? origin : undefined;
 }
 
+/**
+ * Addresses the standalone backend may listen on. Loopback is the default. `0.0.0.0` and `::` exist for a container,
+ * where Docker can only forward a port the server listens on for every address; the container's port must then be
+ * published to 127.0.0.1 only. A network card's own address is refused, because it would put the dashboard on the network.
+ */
+const LISTEN_HOSTS = ["127.0.0.1", "::1", "0.0.0.0", "::"];
+const LOOPBACK_HOSTS = ["127.0.0.1", "::1"];
+const DEFAULT_PORT = 45820;
+
+export type ListenAddress = { host: string; port: number; loopback: boolean } | { error: string };
+
+/** Reads `AGENTDOCK_HOST` and `AGENTDOCK_PORT`. Unset, the backend listens on 127.0.0.1:45820. */
+export function parseListenAddress(env: Record<string, string | undefined>): ListenAddress {
+  const host = env.AGENTDOCK_HOST || "127.0.0.1";
+  if (!LISTEN_HOSTS.includes(host)) {
+    return { error: `AGENTDOCK_HOST must be one of ${LISTEN_HOSTS.join(", ")}; got "${host}".` };
+  }
+  const rawPort = env.AGENTDOCK_PORT || String(DEFAULT_PORT);
+  const port = /^\d{1,5}$/.test(rawPort) ? Number(rawPort) : NaN;
+  if (!(port >= 1 && port <= 65535)) {
+    return { error: `AGENTDOCK_PORT must be a whole number from 1 to 65535; got "${rawPort}".` };
+  }
+  return { host, port, loopback: LOOPBACK_HOSTS.includes(host) };
+}
+
 const CODEX_OFF =
   "The code explainer runs Codex CLI, which is turned off. Restart the backend with AGENTDOCK_CODEX=1 to turn it on.";
 
@@ -453,16 +478,30 @@ if (process.argv[1]?.endsWith("server.ts") || process.argv[1]?.endsWith("server.
   const projectPath = resolve(
     flag > -1 && process.argv[flag + 1] ? process.argv[flag + 1] : (process.env.AGENTDOCK_PROJECT ?? "."),
   );
-  const server = new AgentDockBackendServer({ port: 45820, projectPath });
-  server
-    .start()
-    .then(({ host, port }) => {
-      console.log(`AgentDock Backend running at http://${host}:${port}`);
-      console.log(`Reading the audit log of ${projectPath} (${server.getAuditReader().databasePath})`);
-      console.log(`WebSocket event stream ready at ws://${host}:${port}/ws/events`);
-    })
-    .catch((err: unknown) => {
-      console.error(`AgentDock Backend failed to start: ${err instanceof Error ? err.message : String(err)}`);
-      process.exitCode = 1;
-    });
+  const listen = parseListenAddress(process.env);
+  if ("error" in listen) {
+    console.error(`AgentDock Backend did not start: ${listen.error}`);
+    process.exitCode = 1;
+  } else {
+    const server = new AgentDockBackendServer({ host: listen.host, port: listen.port, projectPath });
+    server
+      .start()
+      .then(({ port }) => {
+        // On 0.0.0.0 or :: the address to open is still this machine's: the Host check accepts nothing else.
+        const shown = listen.host === "::1" ? "[::1]" : "127.0.0.1";
+        console.log(`AgentDock Backend running at http://${shown}:${port}`);
+        if (!listen.loopback) {
+          console.log(
+            `Listening on every address (${listen.host}) for a container. Publish the port to 127.0.0.1 only, ` +
+              `for example -p 127.0.0.1:${port}:${port}; anything else puts the audit log on the network.`,
+          );
+        }
+        console.log(`Reading the audit log of ${projectPath} (${server.getAuditReader().databasePath})`);
+        console.log(`WebSocket event stream ready at ws://${shown}:${port}/ws/events`);
+      })
+      .catch((err: unknown) => {
+        console.error(`AgentDock Backend failed to start: ${err instanceof Error ? err.message : String(err)}`);
+        process.exitCode = 1;
+      });
+  }
 }
