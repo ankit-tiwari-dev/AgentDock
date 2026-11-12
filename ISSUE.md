@@ -93,3 +93,16 @@ Status flow: FOUND → IN PROGRESS → FIXED. Each entry: symptoms, root cause, 
 - **Symptoms:** opening the dashboard requests `fonts.googleapis.com` and `fonts.gstatic.com`, which tells Google the dashboard is open, and the CSP has to allow both hosts.
 - **Root cause:** `frontend/src/app/styles.css` starts with a Google Fonts `@import`.
 - **Fix (proposed):** bundle the fonts at build time (`next/font`) or use system fonts, then drop the two hosts from the CSP.
+
+## I-15 · FIXED · Every Dependabot pull request failed its checks
+
+- **Symptoms:** the weekly dev-dependency PR failed at `npm ci` with `ERESOLVE ... peer typescript@">=4.8.4 <6.1.0" from typescript-eslint`. The CodeQL PRs failed with `Loaded a configuration file for version '4.39.3', but running version '4.39.1'`.
+- **Root cause:** `.github/dependabot.yml` let one PR carry TypeScript 7 (typescript-eslint, even its latest release, accepts TypeScript below 6.1) and `@types/node` 26 (the packages support Node 22.18 and newer). It also opened one PR per action, so `github/codeql-action/init` and `/analyze`, which must be the same version, never moved together.
+- **Fix:** Dependabot skips major versions of `typescript` and `@types/node`; move those by hand when the tools support them. All GitHub Actions updates come in one PR.
+- **Verification:** Dependabot rebuilds its open PRs under the new rules. The dev-dependency PR then holds only the minor updates, and the CodeQL PR updates both steps; each must pass CI before it is merged.
+
+## I-16 · FOUND · Dependabot alert: minimatch denial of service (GHSA-g3hv-75wg-m249)
+
+- **Symptoms:** a moderate alert for `minimatch` 10.2.6. A crafted glob pattern can make matching take very long.
+- **Root cause:** `eslint`, `@eslint/config-array` and `@typescript-eslint/typescript-estree` require `minimatch ^10`, even in their latest releases; the fix is in 11.0.1. It is a development dependency only: it runs inside the linter, on glob patterns this repo writes, and is not part of what ships.
+- **Fix (waiting):** none yet. It clears when those packages move to minimatch 11, and Dependabot will propose that update. Forcing 11 with an npm `overrides` entry would run the linters on a major version they were not tested with. The alert stays open rather than dismissed, so it is not forgotten.
