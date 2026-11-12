@@ -94,6 +94,31 @@ export function findUnpinnedActions(file: string, text: string): Finding[] {
   return findings;
 }
 
+const PINNED_IMAGE = /^[^\s@]+@sha256:[0-9a-f]{64}$/;
+
+/**
+ * Every Dockerfile `FROM` names its image by digest, so a rebuilt tag cannot change what is built; Dependabot moves
+ * the digest. `FROM <earlier stage>` and `FROM scratch` name no image and pass.
+ */
+export function findUnpinnedImages(file: string, text: string): Finding[] {
+  const findings: Finding[] = [];
+  const stages = new Set<string>(["scratch"]);
+  text.split("\n").forEach((line, index) => {
+    const match = /^\s*FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?/i.exec(line);
+    if (!match) return;
+    const [, image, stage] = match;
+    if (!stages.has(image.toLowerCase()) && !PINNED_IMAGE.test(image)) {
+      findings.push({
+        check: "pinned-images",
+        file: `${file}:${index + 1}`,
+        detail: `${image} is not pinned to a digest`,
+      });
+    }
+    if (stage) stages.add(stage.toLowerCase());
+  });
+  return findings;
+}
+
 /** A test file counts only if it declares a test; an empty `*.test.ts` does not. */
 const DECLARES_TEST = /\b(?:test|it|describe)\s*\(/;
 
@@ -173,6 +198,7 @@ function runAllChecks(root: string): Finding[] {
     const text = readFileSync(join(root, file), "utf8");
     findings.push(...findForbiddenNames(file, text), ...findPlanningReferences(file, text));
     if (/^\.github\/workflows\/.+\.ya?ml$/.test(file)) findings.push(...findUnpinnedActions(file, text));
+    if (/(^|\/)(Dockerfile|[^/]+\.Dockerfile)$/.test(file)) findings.push(...findUnpinnedImages(file, text));
   }
 
   // The workspaces listed in the root package.json, each a folder at the repo root.

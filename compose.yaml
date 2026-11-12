@@ -1,0 +1,25 @@
+# AGENTDOCK_PROJECT_DIR=/path/to/project docker compose up --build
+# Then open http://127.0.0.1:45820. Why these settings: docs/DECISIONS.md, D-4.
+services:
+  agentdock:
+    build: .
+    image: agentdock:local
+    ports:
+      # 127.0.0.1 only. The server listens on every address inside the container so Docker can forward the port,
+      # and the Host check does not stop a client on the network, which can send any Host header.
+      # Both numbers must be the same: the Host check expects the server's own port.
+      - "127.0.0.1:${AGENTDOCK_PORT:-45820}:${AGENTDOCK_PORT:-45820}"
+    environment:
+      AGENTDOCK_PORT: "${AGENTDOCK_PORT:-45820}"
+    volumes:
+      # Read-only, and required to be: on Docker Desktop a writable mount of a live audit.db fails with
+      # "disk I/O error", while a read-only one reads every new row.
+      - "${AGENTDOCK_PROJECT_DIR:?Set AGENTDOCK_PROJECT_DIR to the project whose audit log to show}:/project:ro"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped

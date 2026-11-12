@@ -27,3 +27,13 @@ updates:
       # and a separate PR for each fails CodeQL.
       github-actions:
         patterns: ["*"]
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    ignore:
+      # A new Node major goes with .nvmrc, `engines` and the CI matrix, so it is moved by hand.
+      # The digest of node:24-alpine is still updated.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
