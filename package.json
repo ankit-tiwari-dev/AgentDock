@@ -17,7 +17,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "hygiene": "node scripts/hygiene.ts"
+    "hygiene": "node scripts/hygiene.ts",
+    "docker:smoke": "node scripts/docker-smoke.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

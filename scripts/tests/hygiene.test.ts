@@ -8,6 +8,7 @@ import {
   findPackagesWithoutTests,
   findPlanningReferences,
   findUnpinnedActions,
+  findUnpinnedImages,
   sha256,
 } from "../hygiene.ts";
 
@@ -160,5 +161,28 @@ test("hygiene - workspaces at the repo root are checked without the packages/ pr
   assert.deepEqual(
     findPackagesWithoutTests([{ name: "frontend", testFiles: [] }], undefined, "").map((f) => f.file),
     ["frontend"],
+  );
+});
+
+test("hygiene - every Dockerfile FROM names its image by digest; a build stage or scratch needs none", () => {
+  const digest = `sha256:${"a".repeat(64)}`;
+  const dockerfile = [
+    `FROM node:24-alpine@${digest} AS build`,
+    "RUN npm ci",
+    "FROM node:24-alpine",
+    "from --platform=linux/amd64 node:latest as tools",
+    "FROM build",
+    "FROM tools",
+    "FROM scratch",
+    `FROM --platform=$BUILDPLATFORM docker.io/library/node@${digest}`,
+    `FROM node@sha256:${"a".repeat(63)}`,
+  ].join("\n");
+  assert.deepEqual(
+    findUnpinnedImages("Dockerfile", dockerfile).map((f) => `${f.file} ${f.detail}`),
+    [
+      "Dockerfile:3 node:24-alpine is not pinned to a digest",
+      "Dockerfile:4 node:latest is not pinned to a digest",
+      `Dockerfile:9 node@sha256:${"a".repeat(63)} is not pinned to a digest`,
+    ],
   );
 });
