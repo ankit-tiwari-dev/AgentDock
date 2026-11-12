@@ -1,2 +1,4 @@
 # Formatting-only commits, skipped by git blame (git config blame.ignoreRevsFile .git-blame-ignore-revs).
 14fc06fa4c430df2c02c988790c1de860dffdc33
+# Prettier over the Next.js dashboard and the audit-log backend
+a36faf98a960821b8d7384470f2d3d9baff4f48b

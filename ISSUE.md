@@ -28,7 +28,7 @@ Status flow: FOUND → IN PROGRESS → FIXED. Each entry: symptoms, root cause, 
 - **Symptoms:** an event whose `type` or `data` held markup was inserted into the page as HTML (cross-site scripting). Interview questions and answers were inserted the same way.
 - **Root cause:** `frontend/public/index.html` built the timeline rows and the question list with `innerHTML` template strings.
 - **Fix:** both are built with `createElement` and `textContent`. The radio-button selector escapes the question id with `CSS.escape`. The connection badge says "Backend connected", because the page cannot tell whether a daemon runs.
-- **Verification:** `frontend/tests/security.test.ts` → `regression: the dashboard never builds HTML out of server or event data`.
+- **Verification:** `frontend/tests/security.test.ts` → `regression: the dashboard never builds HTML out of server or event data`. The dashboard is now a Next.js app; the same test scans its sources for `dangerouslySetInnerHTML`, `innerHTML`, `outerHTML` and `insertAdjacentHTML`.
 
 ## I-5 · FIXED · The extension sidebar had no CSP and made up a locked spec when the backend was down
 
@@ -43,25 +43,52 @@ Status flow: FOUND → IN PROGRESS → FIXED. Each entry: symptoms, root cause, 
 - **Root cause:** `extension/src/extension.ts` exports `activateExtension` but no `activate`/`deactivate`, and never calls `registerWebviewViewProvider` or `registerCommand`. `main` points at a `.ts` file with no build step, and `engines.vscode` is `^1.85`, whose runtime cannot strip types. The `run_verification` and `open_browser_dashboard` messages and the `modelProvider`, `modelName` and `backendPort` settings are declared but never handled.
 - **Fix (proposed):** decide the extension's scope first, then add a build to JavaScript, an `activate` that registers the view and commands, and a packaging ignore list.
 
-## I-7 · FOUND · The dashboard shows sample data as if it were live
+## I-7 · FIXED · The dashboard showed sample data as if it were live
 
-- **Symptoms:** the overview numbers, the seeded timeline, the verification board ("Verify" only shows an alert) and the diff view never change.
-- **Root cause:** they are fixed HTML. Nothing in `agentdock-cli` posts events to `/api/events/broadcast`.
-- **Fix (proposed):** either connect the CLI daemon to the backend, or label each sample panel as a preview until it is.
+- **Symptoms:** the overview numbers, the seeded timeline, the verification board ("Verify" only showed an alert) and the diff view never changed.
+- **Root cause:** they were fixed HTML, and nothing in `agentdock-cli` sent events to the backend.
+- **Fix:** the Next.js dashboard shows only data from the backend. The backend reads the project's `.ctrlplane/audit.db` (the file the CLI daemon writes on every hook call) through a read-only connection, serves it at `/api/dashboard/state`, and streams new rows over `/ws/events` once a second. Panels with no backing data were removed.
+- **Verification:** `backend/tests/audit-reader.test.ts` (mapping, counts, polling, read-only, a stopped daemon), `backend/tests/dashboard-api.test.ts` (the endpoint and the stream). By hand: the backend started with `--project` on a project with two recorded hook calls, opened in headless Edge, showed "2 events stored" and "Live stream connected".
 
 ## I-8 · FOUND · No license file
 
 - **Symptoms:** the old README claimed MIT, but there is no `LICENSE`. Without one the code is not open source in practice.
 - **Fix (proposed):** the owner picks a license and adds `LICENSE`.
 
-## I-9 · FOUND · The dashboard loads Tailwind from a CDN with no version pin or integrity hash
+## I-9 · FIXED · The dashboard loaded Tailwind from a CDN with no version pin or integrity hash
 
-- **Symptoms:** `frontend/public/index.html` runs whatever `https://cdn.tailwindcss.com` serves, with the page's full access to the local API.
-- **Root cause:** the play-CDN script tag has no version and no `integrity` attribute. It also generates styles at runtime, which stops the dashboard from using a strict Content Security Policy.
-- **Fix (proposed):** build the CSS once and serve it from the backend, then add a CSP to the dashboard like the extension's.
+- **Symptoms:** the old `frontend/public/index.html` ran whatever `https://cdn.tailwindcss.com` served, with the page's full access to the local API.
+- **Root cause:** the play-CDN script tag had no version and no `integrity` attribute, and its runtime styles ruled out a strict Content Security Policy.
+- **Fix:** the dashboard is a Next.js static export whose scripts and styles are served by the backend. Every HTML response carries a CSP that allows only the page's own files and the inline scripts it shipped with, each by its SHA-256 hash (`backend/src/static-files.ts`).
+- **Verification:** `backend/tests/static-serving.test.ts` → `the dashboard page is served with a policy that only runs its own scripts`. By hand: headless Edge reported no CSP violation and the page's scripts ran.
 
 ## I-10 · FIXED · `frontend/package.json` pointed at a file that does not exist
 
 - **Symptoms:** `main`, `types` and `exports` named `./src/app.ts`.
-- **Fix:** they name `./src/index.ts`.
+- **Fix:** they named `./src/index.ts`. The Next.js frontend now has no `main` or `exports`; the test still checks every workspace.
 - **Verification:** `regression: every entry point named in a workspace package.json exists` (old code: `frontend: ./src/app.ts`).
+
+## I-11 · FIXED · One request for `/%` stopped the backend
+
+- **Symptoms:** `GET /%` (or any path with a broken percent-escape) ended the backend process with `URIError: URI malformed`. Any web page could do this with an image tag pointing at `127.0.0.1:45820`.
+- **Root cause:** the static-file branch of `backend/src/server.ts` called `decodeURIComponent` with no `try`, inside the request handler, so the exception was uncaught.
+- **Fix:** `decodePath` in `backend/src/static-files.ts` returns nothing for a bad escape or a NUL byte, and the server answers 400.
+- **Verification:** `backend/tests/static-serving.test.ts` → `regression: a malformed percent-escape gets 400 and the backend keeps running`. On the old code the request never got an answer and the process exited with code 1.
+
+## I-12 · FOUND · The audit log does not store which rule decided a tool call
+
+- **Symptoms:** the dashboard shows "Matched rule: Not recorded", and the Policies tab groups decisions by the first line of their message instead of by rule.
+- **Root cause:** the `agentdock-cli` daemon computes `matchedRuleId` for its reply but does not write it to the `events` table, which has no column for it.
+- **Fix (proposed):** add a `rule_id` column in `agentdock-cli`, then read it here.
+
+## I-13 · FOUND · Hook calls made while the daemon is stopped never reach the dashboard
+
+- **Symptoms:** with the daemon stopped, the hooks still allow and deny (from local rules), but nothing appears on the dashboard.
+- **Root cause:** only the daemon writes `audit.db`; the hook's local fallback records nothing.
+- **Fix (proposed):** the dashboard already says where it reads from; the README tells you to run `ctrlplane start`. A real fix belongs in `agentdock-cli`.
+
+## I-14 · FOUND · The dashboard loads its fonts from Google
+
+- **Symptoms:** opening the dashboard requests `fonts.googleapis.com` and `fonts.gstatic.com`, which tells Google the dashboard is open, and the CSP has to allow both hosts.
+- **Root cause:** `frontend/src/app/styles.css` starts with a Google Fonts `@import`.
+- **Fix (proposed):** bundle the fonts at build time (`next/font`) or use system fonts, then drop the two hosts from the CSP.
