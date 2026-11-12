@@ -24,7 +24,14 @@ export interface ServerConfig {
   port?: number;
   host?: string;
   projectPath?: string;
+  /** Lets the guide and the explainer run Codex CLI. Off unless AGENTDOCK_CODEX=1, because each run calls a paid model. */
+  codexEnabled?: boolean;
+  /** Replaces the Codex runner, for tests. */
+  codexRoles?: Pick<CodexRoleService, "interview" | "review">;
 }
+
+const CODEX_OFF =
+  "The code explainer runs Codex CLI, which is turned off. Restart the backend with AGENTDOCK_CODEX=1 to turn it on.";
 
 export class AgentDockBackendServer {
   private server;
@@ -32,7 +39,9 @@ export class AgentDockBackendServer {
   private supervisor: SupervisorService;
   private audit: AuditReader;
   private pollTimer: ReturnType<typeof setInterval> | undefined;
-  private codexRoles: CodexRoleService;
+  private codexRoles: Pick<CodexRoleService, "interview" | "review">;
+  private codexEnabled: boolean;
+  private codexBusy = false;
   private port: number;
   private host: string;
 
@@ -43,7 +52,8 @@ export class AgentDockBackendServer {
     this.supervisor = new SupervisorService();
     const projectPath = config?.projectPath ?? process.cwd();
     this.audit = new AuditReader(projectPath);
-    this.codexRoles = new CodexRoleService(projectPath);
+    this.codexRoles = config?.codexRoles ?? new CodexRoleService(projectPath);
+    this.codexEnabled = config?.codexEnabled ?? process.env.AGENTDOCK_CODEX === "1";
 
     this.server = createServer((req, res) => {
       this.handleHttpRequest(req, res);
@@ -159,6 +169,7 @@ export class AgentDockBackendServer {
         version: "0.1.0",
         uptimeSeconds: Math.floor(process.uptime()),
         connectedClients: this.broadcaster.getConnectedClientsCount(),
+        codexEnabled: this.codexEnabled,
       });
       return;
     }
@@ -176,19 +187,36 @@ export class AgentDockBackendServer {
           return;
         }
 
-        void this.codexRoles.interview(body.featurePrompt, body.developerAnswers).then((interviewResult) => {
-          if (interviewResult.isRefined && interviewResult.lockedSpecification) {
-            this.broadcaster.broadcast({ type: "spec_updated", sessionId: "active_session", timestamp: Date.now(), data: { title: interviewResult.lockedSpecification.title, specHash: interviewResult.lockedSpecification.specHash, criteriaCount: interviewResult.lockedSpecification.acceptanceCriteria.length } });
+        const announce = (result: { isRefined: boolean; lockedSpecification?: { title: string; specHash: string; acceptanceCriteria: string[] } }) => {
+          if (result.isRefined && result.lockedSpecification) {
+            this.broadcaster.broadcast({
+              type: "spec_updated",
+              sessionId: "active_session",
+              timestamp: Date.now(),
+              data: {
+                title: result.lockedSpecification.title,
+                specHash: result.lockedSpecification.specHash,
+                criteriaCount: result.lockedSpecification.acceptanceCriteria.length,
+              },
+            });
           }
-          this.sendJson(res, 200, interviewResult);
-        }).catch((error: unknown) => this.sendJson(res, 503, { error: error instanceof Error ? error.message : String(error) }));
+          this.sendJson(res, 200, result);
+        };
+        if (!this.codexEnabled) {
+          announce(this.supervisor.conductInterview(body));
+          return;
+        }
+        this.runCodex(res, () => this.codexRoles.interview(body.featurePrompt, body.developerAnswers), announce);
       });
       return;
     }
 
     if (req.method === "POST" && pathname === "/api/reviewer/explain") {
-      void this.codexRoles.review().then((result) => this.sendJson(res, 200, result))
-        .catch((error: unknown) => this.sendJson(res, 503, { error: error instanceof Error ? error.message : String(error) }));
+      if (!this.codexEnabled) {
+        this.sendJson(res, 503, { error: CODEX_OFF });
+        return;
+      }
+      this.runCodex(res, () => this.codexRoles.review(), (result) => this.sendJson(res, 200, result));
       return;
     }
 
@@ -304,6 +332,21 @@ export class AgentDockBackendServer {
 
     // Default 404
     this.sendJson(res, 404, { error: "Not Found", path: pathname });
+  }
+
+  /** One Codex run at a time: each one is a model session that costs money and can take minutes. */
+  private runCodex<T>(res: ServerResponse, run: () => Promise<T>, done: (result: T) => void): void {
+    if (this.codexBusy) {
+      this.sendJson(res, 409, { error: "A Codex run is already in progress. Wait for it to finish." });
+      return;
+    }
+    this.codexBusy = true;
+    run()
+      .then(done)
+      .catch((error: unknown) => this.sendJson(res, 503, { error: error instanceof Error ? error.message : String(error) }))
+      .finally(() => {
+        this.codexBusy = false;
+      });
   }
 
   private sendJson(res: ServerResponse, statusCode: number, data: unknown): void {
