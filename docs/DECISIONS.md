@@ -54,7 +54,7 @@ Each entry: the decision, why, and what it rules out.
 
 ## D-6 · "Needs you" shows approval requests from the last 15 minutes
 
-**Decision:** the Overview's "Needs you" card lists tool calls whose verdict was `REQUIRE_MANUAL_APPROVAL` and that happened in the last 15 minutes, newest first, and tells the developer to answer in that agent. The "Asked for approval" card shows the all-time count next to how many fall in that window.
+**Decision:** the Overview's "Needs you" card lists tool calls whose verdict was `REQUIRE_MANUAL_APPROVAL` that happened in the last 15 minutes and have no record they ran (D-7), newest first, and tells the developer to answer in that agent. The "Asked for approval" card shows the all-time count next to how many fall in that window.
 
 **Why:**
 
@@ -66,7 +66,7 @@ Each entry: the decision, why, and what it rules out.
 
 ## D-7 · Six pages, and "Ran afterwards" instead of "approved"
 
-**Decision:** the dashboard has six pages: Overview, Waiting on you, Sessions, Rules, Plan & review and Project. The page is kept in the address hash. Waiting on you marks an approval request "Ran afterwards" when the same session later completed the same tool with the same target, and "No record it ran" otherwise; the sidebar count is the requests from the last 15 minutes (D-6) with no such record.
+**Decision:** the dashboard has six pages: Overview, Waiting on you, Sessions, Rules, Plan & review and Project. The page is kept in the address hash. Waiting on you marks an approval request "Ran afterwards" when the same session later completed the same tool with the same target before asking for it again, and "No record it ran" otherwise; the sidebar count, and the Overview's "Needs you" card, are the requests from the last 15 minutes (D-6) with no such record.
 
 **Why:**
 

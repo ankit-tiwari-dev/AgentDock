@@ -12,6 +12,7 @@ import {
   filterStream,
   newlyArrived,
   projectName,
+  approvalRequests,
   recentApprovalRequests,
   relativeTime,
   statusTone,
@@ -67,7 +68,8 @@ export default function Overview({ snapshot, connected, backendReachable, checke
 
   const counts = useMemo(() => streamCounts(shown), [shown]);
   const visible = useMemo(() => filterStream(shown, filter, query), [shown, filter, query]);
-  const waiting = recentApprovalRequests(snapshot.events, now);
+  const asked = recentApprovalRequests(snapshot.events, now);
+  const waiting = approvalRequests(snapshot.events, now).waiting;
   const activeSessions = snapshot.sessions.filter((session) => session.status === "active");
   const latest = snapshot.events[0];
   const empty = checked && backendReachable && snapshot.events.length === 0;
@@ -149,7 +151,7 @@ export default function Overview({ snapshot, connected, backendReachable, checke
         >
           <span className="ov-k">Asked for approval</span>
           <span className="ov-v ov-v-ask">{snapshot.counts.reviewCalls.toLocaleString()}</span>
-          <span className="ov-k">{waiting.length} in the last 15 minutes</span>
+          <span className="ov-k">{asked.length} in the last 15 minutes</span>
         </button>
         <div className="ov-card">
           <span className="ov-k">Active sessions</span>

@@ -217,30 +217,42 @@ export function pageFromHash(hash: string): Page {
 
 /**
  * The audit log stores that a call asked for approval, not what the developer answered. A later completed call
- * from the same session with the same tool and target is the only sign the request was allowed.
+ * from the same session with the same tool and target is the only sign the request was allowed; it answers only
+ * the newest such request before it, so an earlier, denied request for the same command does not look run.
  */
 export function ranAfterwards(request: DashboardEvent, events: DashboardEvent[]): boolean {
   const target = eventTarget(request);
+  const same = (event: DashboardEvent) =>
+    event.sessionId === request.sessionId && event.toolName === request.toolName && eventTarget(event) === target;
+  const askedAgain = events
+    .filter(
+      (event) =>
+        event.id !== request.id &&
+        eventStatus(event) === "Needs approval" &&
+        event.timestamp > request.timestamp &&
+        same(event),
+    )
+    .reduce((first, event) => Math.min(first, event.timestamp), Infinity);
   return events.some(
     (event) =>
       event.hookEventName === "PostToolUse" &&
-      event.sessionId === request.sessionId &&
-      event.toolName === request.toolName &&
       event.timestamp >= request.timestamp &&
-      eventTarget(event) === target,
+      event.timestamp < askedAgain &&
+      same(event),
   );
 }
 
 export function approvalRequests(
   events: DashboardEvent[],
   now = Date.now(),
-): { recent: DashboardEvent[]; earlier: DashboardEvent[]; open: number } {
+): { recent: DashboardEvent[]; earlier: DashboardEvent[]; waiting: DashboardEvent[]; open: number } {
   const requests = events
     .filter((event) => eventStatus(event) === "Needs approval")
     .sort((a, b) => b.timestamp - a.timestamp);
   const recent = requests.filter((event) => now - event.timestamp <= APPROVAL_WINDOW_MS);
   const earlier = requests.filter((event) => now - event.timestamp > APPROVAL_WINDOW_MS);
-  return { recent, earlier, open: recent.filter((event) => !ranAfterwards(event, events)).length };
+  const waiting = recent.filter((event) => !ranAfterwards(event, events));
+  return { recent, earlier, waiting, open: waiting.length };
 }
 
 export function sessionTimeline(events: DashboardEvent[], sessionId: string): DashboardEvent[] {

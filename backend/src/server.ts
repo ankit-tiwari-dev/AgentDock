@@ -69,7 +69,7 @@ export function parseListenAddress(env: Record<string, string | undefined>): Lis
 }
 
 const CODEX_OFF =
-  "The code explainer runs Codex CLI, which is turned off. Restart the backend with AGENTDOCK_CODEX=1 to turn it on.";
+  "Explaining changes runs Codex CLI, which is turned off. Restart the backend with AGENTDOCK_CODEX=1 to turn it on.";
 
 export class AgentDockBackendServer {
   private server;

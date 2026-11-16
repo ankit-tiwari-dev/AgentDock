@@ -80,7 +80,11 @@ export default function Rules({
           folder.
         </p>
         <CommandLine label="See every rule" command="ctrlplane policies list" onCopy={onCopy} />
-        <CommandLine label="Try a command" command='ctrlplane policies test "git push origin main"' onCopy={onCopy} />
+        <CommandLine
+          label="Try a command"
+          command='ctrlplane policies test --command "git push origin main"'
+          onCopy={onCopy}
+        />
       </section>
     </>
   );

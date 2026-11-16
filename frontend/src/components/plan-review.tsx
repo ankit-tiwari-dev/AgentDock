@@ -139,8 +139,11 @@ export default function PlanReview({ apiOrigin, codexEnabled, onCopy, onToast }:
                 </button>
               </div>
             </form>
-            {questions && questions.length > 0 && !spec && (
+            {questions && !spec && (
               <div className="pg-questions">
+                {questions.length === 0 && (
+                  <p className="pg-note">The supervisor has no questions for this one. Write the handoff.</p>
+                )}
                 {questions.map((question) => (
                   <fieldset key={question.id} className="pg-q">
                     <legend>{question.question}</legend>
@@ -161,7 +164,7 @@ export default function PlanReview({ apiOrigin, codexEnabled, onCopy, onToast }:
                 <button
                   type="button"
                   className="ov-btn pg-primary"
-                  disabled={busy !== null || !Object.keys(answers).length}
+                  disabled={busy !== null || (questions.length > 0 && !Object.keys(answers).length)}
                   onClick={writeHandoff}
                 >
                   {busy === "handoff" ? "Writing the handoff…" : "Write the handoff"}

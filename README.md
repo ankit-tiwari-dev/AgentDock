@@ -75,7 +75,7 @@ Keep these two parts of the command as they are:
 
 To use another port, set it once, so both sides match: `AGENTDOCK_PORT=45900 docker compose up`. With `docker run`, use `-e AGENTDOCK_PORT=45900 -p 127.0.0.1:45900:45900`. A published port that differs from the container's own is refused by the `Host` check.
 
-The image holds Node, the backend and the built dashboard, and runs as a non-root user. Compose also makes its filesystem read-only and drops all Linux capabilities. Codex CLI is not in the image, so the product guide uses its built-in questions. Why it works this way: [`docs/DECISIONS.md`](docs/DECISIONS.md) → D-4.
+The image holds Node, the backend and the built dashboard, and runs as a non-root user. Compose also makes its filesystem read-only and drops all Linux capabilities. Codex CLI is not in the image, so Plan & review uses its built-in questions. Why it works this way: [`docs/DECISIONS.md`](docs/DECISIONS.md) → D-4.
 
 ## Security model
 

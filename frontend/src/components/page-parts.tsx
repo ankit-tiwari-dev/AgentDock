@@ -64,6 +64,10 @@ export function StripLegend() {
         <i className="pg-t pg-t-blocked" />
         Blocked
       </span>
+      <span>
+        <i className="pg-t pg-t-observed" />
+        Observed
+      </span>
     </div>
   );
 }

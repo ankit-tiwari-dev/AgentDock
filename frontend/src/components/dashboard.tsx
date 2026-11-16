@@ -238,8 +238,9 @@ export default function Dashboard() {
                   <NavIcon page={item.id} />
                   {item.label}
                   {item.id === "waiting" && open > 0 && (
-                    <span className="ad-badge" aria-label={`${open} with no record ${open === 1 ? "it" : "they"} ran`}>
+                    <span className="ad-badge">
                       {open}
+                      <span className="sr-only"> with no record {open === 1 ? "it" : "they"} ran</span>
                     </span>
                   )}
                 </a>
@@ -289,14 +290,15 @@ export default function Dashboard() {
           {page === "waiting" && <Waiting snapshot={snapshot} now={now} />}
           {page === "sessions" && <Sessions snapshot={snapshot} now={now} />}
           {page === "rules" && <Rules snapshot={snapshot} onCopy={copy} />}
-          {page === "plan" && (
+          {/* Stays mounted so a running plan or Codex explanation keeps its answer across page switches. */}
+          <div hidden={page !== "plan"}>
             <PlanReview
               apiOrigin={API_ORIGIN}
               codexEnabled={health?.codexEnabled === true}
               onCopy={copy}
               onToast={setToast}
             />
-          )}
+          </div>
           {page === "project" && (
             <Project
               snapshot={snapshot}

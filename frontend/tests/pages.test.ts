@@ -54,6 +54,14 @@ test("an approval request ran only if the same session later completed the same 
   assert.equal(ranAfterwards(request, [request, done("d", "npm publish", 50)]), false);
 });
 
+test("regression: a completion answers only the newest request before it, so a denied request does not look run", () => {
+  const denied = ask("denied", "git push", 100);
+  const approved = ask("approved", "git push", 200);
+  const events = [done("d", "git push", 300), approved, denied];
+  assert.equal(ranAfterwards(approved, events), true);
+  assert.equal(ranAfterwards(denied, events), false);
+});
+
 test("approval requests split at 15 minutes, and only unanswered recent ones count as open", () => {
   const now = 10 * APPROVAL_WINDOW_MS;
   const events = [
@@ -73,6 +81,19 @@ test("approval requests split at 15 minutes, and only unanswered recent ones cou
     ["old"],
   );
   assert.equal(open, 1);
+});
+
+test("regression: the Overview's waiting list leaves out requests that ran afterwards", () => {
+  const now = 10 * APPROVAL_WINDOW_MS;
+  const events = [
+    done("d", "git push origin main", now - 1_000),
+    ask("recent-ran", "git push origin main", now - 2_000),
+    ask("recent-open", "npm publish", now - 3_000),
+  ];
+  assert.deepEqual(
+    approvalRequests(events, now).waiting.map((e) => e.id),
+    ["recent-open"],
+  );
 });
 
 test("a session's timeline holds its own tool calls, newest first", () => {
