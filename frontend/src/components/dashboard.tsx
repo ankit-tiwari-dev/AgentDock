@@ -9,9 +9,10 @@ import {
   relativeTime,
   statusTone,
   summarize,
+  projectName,
   summarizeRules,
 } from "../lib/events";
-import Overview from "./overview";
+import Overview, { SETUP_COMMAND } from "./overview";
 
 type Tab = "overview" | "activity" | "sessions" | "policies" | "guide" | "reviewer" | "coach";
 type Question = { id: string; question: string; whyItMatters: string; suggestedAnswers: string[] };
@@ -109,10 +110,6 @@ function NavIcon({ tab }: { tab: Tab }) {
       {shapes[tab]}
     </svg>
   );
-}
-
-function projectLabel(path: string | undefined): string {
-  return path?.split(/[\\/]/).filter(Boolean).pop() || "No project";
 }
 
 export default function Dashboard() {
@@ -309,7 +306,7 @@ export default function Dashboard() {
           </div>
           <div className="ad-brand-text">
             <strong>AgentDock</strong>
-            <small title={snapshot.source?.projectPath}>{projectLabel(snapshot.source?.projectPath)}</small>
+            <small title={snapshot.source?.projectPath}>{projectName(snapshot.source?.projectPath)}</small>
           </div>
           <button
             type="button"
@@ -955,7 +952,7 @@ function EmptyState({ title, body }: { title: string; body: string }) {
 }
 
 function ConnectHint({ onCopy }: { onCopy: (text: string, label: string) => void }) {
-  const command = "ctrlplane init --agent all";
+  const command = SETUP_COMMAND;
   return (
     <div className="connect-hint">
       <span>Run from your project:</span>

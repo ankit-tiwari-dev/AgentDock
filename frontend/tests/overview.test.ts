@@ -6,6 +6,8 @@ import {
   agentLabel,
   eventTarget,
   filterStream,
+  newlyArrived,
+  projectName,
   recentApprovalRequests,
   streamCounts,
   unseenEvents,
@@ -102,4 +104,19 @@ test("agent ids read as product names, unknown ones pass through", () => {
   assert.equal(agentLabel("codex"), "Codex");
   assert.equal(agentLabel("opencode"), "OpenCode");
   assert.equal(agentLabel("unknown"), "unknown");
+});
+
+test("regression: the first load of a page does not mark every row as new", () => {
+  const rows = [event("2"), event("1")];
+  assert.deepEqual(newlyArrived(null, rows), []);
+  assert.deepEqual(newlyArrived(new Set(), rows), []);
+  assert.deepEqual(newlyArrived(new Set(["1"]), rows), ["2"]);
+  assert.deepEqual(newlyArrived(new Set(["1", "2"]), rows), []);
+});
+
+test("the project name is the last folder of its path, on Windows or POSIX", () => {
+  assert.equal(projectName("/home/me/sample-app/"), "sample-app");
+  assert.equal(projectName("C:\\Users\\me\\sample-app"), "sample-app");
+  assert.equal(projectName(undefined), "No project");
+  assert.equal(projectName(""), "No project");
 });

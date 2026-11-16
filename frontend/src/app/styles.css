@@ -2277,6 +2277,17 @@ button.ov-row:hover {
   .ov-search {
     max-width: none;
   }
+  .ov-pill,
+  .ov-search input,
+  .ov-btn-sm,
+  .ov-queued button,
+  .ov-link {
+    min-height: 44px;
+  }
+  .ov-link {
+    display: inline-flex;
+    align-items: center;
+  }
   .ov-row-head {
     display: none;
   }

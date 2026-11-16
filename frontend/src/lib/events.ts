@@ -186,3 +186,13 @@ const AGENT_NAMES: Record<string, string> = { "claude-code": "Claude Code", code
 export function agentLabel(agent: string): string {
   return AGENT_NAMES[agent] ?? agent;
 }
+
+/** Ids of rows that arrived since the last render. With no earlier rows (the first load) nothing counts as new. */
+export function newlyArrived(previous: Set<string> | null, shown: DashboardEvent[]): string[] {
+  if (!previous || previous.size === 0) return [];
+  return shown.filter((event) => !previous.has(event.id)).map((event) => event.id);
+}
+
+export function projectName(path: string | undefined): string {
+  return path?.split(/[\\/]/).filter(Boolean).pop() || "No project";
+}

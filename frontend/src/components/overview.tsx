@@ -10,6 +10,8 @@ import {
   eventStatus,
   eventTarget,
   filterStream,
+  newlyArrived,
+  projectName,
   recentApprovalRequests,
   relativeTime,
   statusTone,
@@ -17,8 +19,9 @@ import {
   unseenEvents,
 } from "@/lib/events";
 
-const SETUP_COMMAND = "ctrlplane init --agent all";
+export const SETUP_COMMAND = "ctrlplane init --agent all";
 const STREAM_ROWS = 50;
+const NEEDS_SHOWN = 3;
 
 type Props = {
   snapshot: DashboardSnapshot;
@@ -37,6 +40,7 @@ export default function Overview({ snapshot, connected, backendReachable, checke
   const [now, setNow] = useState(() => Date.now());
   const [fresh, setFresh] = useState<Set<string>>(() => new Set());
   const seen = useRef<Set<string> | null>(null);
+  const freshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const searchRef = useRef<HTMLInputElement>(null);
   const needsRef = useRef<HTMLElement>(null);
 
@@ -50,15 +54,16 @@ export default function Overview({ snapshot, connected, backendReachable, checke
   const queued = paused ? unseenEvents(snapshot.events, frozen) : [];
 
   useEffect(() => {
-    const previous = seen.current;
+    const added = newlyArrived(seen.current, shown);
     seen.current = new Set(shown.map((event) => event.id));
-    if (!previous) return;
-    const added = shown.filter((event) => !previous.has(event.id)).map((event) => event.id);
     if (!added.length) return;
     setFresh(new Set(added));
-    const timer = setTimeout(() => setFresh(new Set()), 1600);
-    return () => clearTimeout(timer);
+    // One tool call triggers several refreshes; a refresh that adds nothing must not cancel the pending clear.
+    clearTimeout(freshTimer.current);
+    freshTimer.current = setTimeout(() => setFresh(new Set()), 1600);
   }, [shown]);
+
+  useEffect(() => () => clearTimeout(freshTimer.current), []);
 
   const counts = useMemo(() => streamCounts(shown), [shown]);
   const visible = useMemo(() => filterStream(shown, filter, query), [shown, filter, query]);
@@ -67,14 +72,15 @@ export default function Overview({ snapshot, connected, backendReachable, checke
   const latest = snapshot.events[0];
   const empty = checked && backendReachable && snapshot.events.length === 0;
 
-  let liveText = "Connecting";
+  let liveState = "Connecting";
+  let lastEvent = "";
   let liveTone = "ov-live-off";
   if (checked && !backendReachable) {
-    liveText = "Offline · reconnecting";
+    liveState = "Offline · reconnecting";
     liveTone = "ov-live-down";
   } else if (connected) {
-    const last = latest ? ` · last event ${relativeTime(latest.timestamp, now).toLowerCase()}` : "";
-    liveText = `${paused ? "Paused" : "Live"}${last}`;
+    liveState = paused ? "Paused" : "Live";
+    lastEvent = latest ? ` · last event ${relativeTime(latest.timestamp, now).toLowerCase()}` : "";
     liveTone = paused ? "ov-live-off" : "";
   }
 
@@ -95,15 +101,16 @@ export default function Overview({ snapshot, connected, backendReachable, checke
           </p>
         </div>
         <div className="ov-head-actions">
-          <span className={`ov-live ${liveTone}`} role="status">
+          <span className={`ov-live ${liveTone}`}>
             <span className="ov-dot" aria-hidden="true" />
-            {liveText}
+            {/* Only the state is announced; the ticking "last event" time would be read out every second. */}
+            <span role="status">{liveState}</span>
+            {lastEvent}
           </span>
           <button
             type="button"
             className="ov-btn"
-            aria-pressed={paused}
-            disabled={!backendReachable}
+            disabled={!paused && !backendReachable}
             onClick={() => setFrozen(paused ? null : snapshot.events)}
           >
             {paused ? <PlayIcon /> : <PauseIcon />}
@@ -197,13 +204,15 @@ export default function Overview({ snapshot, connected, backendReachable, checke
             </label>
           </div>
 
-          {queued.length > 0 && (
-            <div className="ov-queued">
-              <button type="button" onClick={() => setFrozen(snapshot.events)}>
-                {queued.length} new event{queued.length === 1 ? "" : "s"}. Show them
-              </button>
-            </div>
-          )}
+          <div aria-live="polite">
+            {queued.length > 0 && (
+              <div className="ov-queued">
+                <button type="button" onClick={() => setFrozen(snapshot.events)}>
+                  {queued.length} new event{queued.length === 1 ? "" : "s"}. Show them
+                </button>
+              </div>
+            )}
+          </div>
 
           {empty ? (
             <div className="ov-empty">
@@ -268,7 +277,16 @@ export default function Overview({ snapshot, connected, backendReachable, checke
           <section ref={needsRef} className="ov-panel ov-needs" aria-labelledby="ov-needs-title">
             <h2 id="ov-needs-title">Needs you</h2>
             {waiting.length ? (
-              waiting.slice(0, 3).map((event) => <ApprovalItem key={event.id} event={event} />)
+              <>
+                {waiting.slice(0, NEEDS_SHOWN).map((event) => (
+                  <ApprovalItem key={event.id} event={event} />
+                ))}
+                {waiting.length > NEEDS_SHOWN && (
+                  <button type="button" className="ov-btn ov-btn-sm" onClick={() => setFilter("Needs approval")}>
+                    {waiting.length - NEEDS_SHOWN} more waiting. Show approval requests
+                  </button>
+                )}
+              </>
             ) : (
               <p className="ov-needs-text">
                 Nothing is waiting for you. When an agent asks before a risky change, it shows up here with what it
@@ -290,7 +308,11 @@ export default function Overview({ snapshot, connected, backendReachable, checke
         </div>
       </div>
 
-      <EventDetail event={selected} onClose={() => setSelected(null)} />
+      <EventDetail
+        event={selected}
+        onClose={() => setSelected(null)}
+        fallbackFocus={() => searchRef.current?.focus()}
+      />
     </>
   );
 }
@@ -381,7 +403,15 @@ function SessionLine({ session, now }: { session: DashboardSession; now: number 
   );
 }
 
-function EventDetail({ event, onClose }: { event: DashboardEvent | null; onClose: () => void }) {
+function EventDetail({
+  event,
+  onClose,
+  fallbackFocus,
+}: {
+  event: DashboardEvent | null;
+  onClose: () => void;
+  fallbackFocus: () => void;
+}) {
   const dialog = useRef<HTMLDialogElement>(null);
   const opener = useRef<HTMLElement | null>(null);
 
@@ -396,7 +426,9 @@ function EventDetail({ event, onClose }: { event: DashboardEvent | null; onClose
 
   function handleClose() {
     onClose();
-    opener.current?.focus();
+    // New events can push the opened row out of the list while the panel is open.
+    if (opener.current?.isConnected) opener.current.focus();
+    else fallbackFocus();
   }
 
   const status = event ? eventStatus(event) : "";
@@ -470,10 +502,6 @@ function Payload({ label, value }: { label: string; value: unknown }) {
 
 function ruleName(event: DashboardEvent): string {
   return event.ruleId ?? "";
-}
-
-function projectName(path: string): string {
-  return path.split(/[\\/]/).filter(Boolean).pop() || path;
 }
 
 function clock(time: number): string {
