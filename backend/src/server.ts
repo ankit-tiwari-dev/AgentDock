@@ -4,9 +4,10 @@ import { join, resolve } from "node:path";
 import { WebSocketBroadcaster } from "./websocket-server.ts";
 import { SupervisorService } from "./supervisor-service.ts";
 import { calculateTurnCost } from "./token-pricing.ts";
-import { AuditReader, type DashboardEvent } from "./audit-reader.ts";
+import type { AuditReader, DashboardEvent } from "./audit-reader.ts";
 import { contentSecurityPolicy, contentType, decodePath, findExportFile } from "./static-files.ts";
 import { CodexRoleService } from "./codex-role-service.ts";
+import { type CodexRoles, ProjectRegistry } from "./projects.ts";
 import type { SupervisorInterviewRequest, TrajectoryLoopCheckRequest, WSEventMessage } from "./types.ts";
 
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -23,6 +24,8 @@ export interface ServerConfig {
   port?: number;
   host?: string;
   projectPath?: string;
+  /** Several projects, in the order the dashboard lists them; overrides `projectPath`. */
+  projectPaths?: string[];
   /** Lets the guide and the explainer run Codex CLI. Off unless AGENTDOCK_CODEX=1, because each run calls a paid model. */
   codexEnabled?: boolean;
   /** The Next.js export to serve. Defaults to `frontend/out` next to the backend or the working folder. */
@@ -32,8 +35,10 @@ export interface ServerConfig {
    * the dashboard. Off unless AGENTDOCK_DEV_ORIGIN is set; only a localhost or 127.0.0.1 address is accepted.
    */
   devOrigin?: string;
-  /** Replaces the Codex runner, for tests. */
-  codexRoles?: Pick<CodexRoleService, "interview" | "review">;
+  /** Replaces the Codex runner for every project, for tests. */
+  codexRoles?: CodexRoles;
+  /** Replaces the Codex runner per project folder, for tests. */
+  codexRolesFor?: (projectPath: string) => CodexRoles;
 }
 
 /** Only a plain http address on this machine may be named as the dev origin. */
@@ -75,9 +80,8 @@ export class AgentDockBackendServer {
   private server;
   private broadcaster: WebSocketBroadcaster;
   private supervisor: SupervisorService;
-  private audit: AuditReader;
+  private projects: ProjectRegistry;
   private pollTimer: ReturnType<typeof setInterval> | undefined;
-  private codexRoles: Pick<CodexRoleService, "interview" | "review">;
   private codexEnabled: boolean;
   private codexBusy = false;
   private staticRoots: string[];
@@ -90,9 +94,12 @@ export class AgentDockBackendServer {
     this.host = config?.host ?? "127.0.0.1";
     this.broadcaster = new WebSocketBroadcaster();
     this.supervisor = new SupervisorService();
-    const projectPath = config?.projectPath ?? process.cwd();
-    this.audit = new AuditReader(projectPath);
-    this.codexRoles = config?.codexRoles ?? new CodexRoleService(projectPath);
+    const paths = config?.projectPaths?.length ? config.projectPaths : [config?.projectPath ?? process.cwd()];
+    const fixedCodex = config?.codexRoles;
+    const codexFor =
+      config?.codexRolesFor ??
+      (fixedCodex ? () => fixedCodex : (projectPath: string) => new CodexRoleService(projectPath));
+    this.projects = new ProjectRegistry(paths, codexFor);
     this.codexEnabled = config?.codexEnabled ?? process.env.AGENTDOCK_CODEX === "1";
     this.devOrigin = parseDevOrigin(config?.devOrigin ?? process.env.AGENTDOCK_DEV_ORIGIN);
     this.staticRoots = config?.staticRoot
@@ -147,15 +154,20 @@ export class AgentDockBackendServer {
 
   public async stop(): Promise<void> {
     clearInterval(this.pollTimer);
-    this.audit.close();
+    for (const project of this.projects.all()) project.reader.close();
     this.broadcaster.closeAll();
     return new Promise((resolve) => {
       this.server.close(() => resolve());
     });
   }
 
+  /** The first project's reader. */
   public getAuditReader(): AuditReader {
-    return this.audit;
+    return this.projects.all()[0].reader;
+  }
+
+  public getProjects(): ProjectRegistry {
+    return this.projects;
   }
 
   /** Streams every event the daemon has written since the last tick to the connected dashboards. */
@@ -165,16 +177,22 @@ export class AgentDockBackendServer {
   }
 
   public broadcastNewAuditEvents(): number {
-    const fresh = this.audit.poll();
-    for (const event of fresh) {
-      this.broadcaster.broadcast({
-        type: streamType(event),
-        sessionId: event.sessionId,
-        timestamp: event.timestamp,
-        data: { ...event },
-      });
+    let sent = 0;
+    for (const project of this.projects.all()) {
+      // The reader swallows its own errors, so one unreadable audit log cannot stop the others.
+      const fresh = project.reader.poll();
+      for (const event of fresh) {
+        this.broadcaster.broadcast({
+          type: streamType(event),
+          sessionId: event.sessionId,
+          timestamp: event.timestamp,
+          data: { ...event },
+          project: project.id,
+        });
+      }
+      sent += fresh.length;
     }
-    return fresh.length;
+    return sent;
   }
 
   /** Only this machine's own names, so a DNS name rebound to 127.0.0.1 is refused. */
@@ -245,8 +263,28 @@ export class AgentDockBackendServer {
       return;
     }
 
+    if (req.method === "GET" && pathname === "/api/projects") {
+      this.sendJson(res, 200, {
+        projects: this.projects.all().map((project) => ({
+          id: project.id,
+          name: project.name,
+          projectPath: project.projectPath,
+          available: project.reader.available(),
+        })),
+      });
+      return;
+    }
+
+    // Requests name a project only by an id this backend gave out; a path is never resolved.
+    const projectRoutes = ["/api/dashboard/state", "/api/supervisor/interview", "/api/reviewer/explain"];
+    const project = this.projects.find(url.searchParams.get("project"));
+    if (projectRoutes.includes(pathname) && !project) {
+      this.sendJson(res, 404, { error: "Unknown project" });
+      return;
+    }
+
     if (req.method === "GET" && pathname === "/api/dashboard/state") {
-      this.sendJson(res, 200, this.audit.snapshot());
+      this.sendJson(res, 200, project!.reader.snapshot());
       return;
     }
 
@@ -280,7 +318,7 @@ export class AgentDockBackendServer {
           announce(this.supervisor.conductInterview(body));
           return;
         }
-        this.runCodex(res, () => this.codexRoles.interview(body.featurePrompt, body.developerAnswers), announce);
+        this.runCodex(res, () => project!.codex.interview(body.featurePrompt, body.developerAnswers), announce);
       });
       return;
     }
@@ -292,7 +330,7 @@ export class AgentDockBackendServer {
       }
       this.runCodex(
         res,
-        () => this.codexRoles.review(),
+        () => project!.codex.review(),
         (result) => this.sendJson(res, 200, result),
       );
       return;
@@ -460,16 +498,16 @@ export class AgentDockBackendServer {
 
 // Standalone runner if executed directly
 if (process.argv[1]?.endsWith("server.ts") || process.argv[1]?.endsWith("server.js")) {
-  const flag = process.argv.indexOf("--project");
-  const projectPath = resolve(
-    flag > -1 && process.argv[flag + 1] ? process.argv[flag + 1] : (process.env.AGENTDOCK_PROJECT ?? "."),
+  const named = process.argv.flatMap((arg, i) =>
+    arg === "--project" && process.argv[i + 1] ? [process.argv[i + 1]] : [],
   );
+  const projectPaths = (named.length ? named : [process.env.AGENTDOCK_PROJECT ?? "."]).map((p) => resolve(p));
   const listen = parseListenAddress(process.env);
   if ("error" in listen) {
     console.error(`AgentDock Backend did not start: ${listen.error}`);
     process.exitCode = 1;
   } else {
-    const server = new AgentDockBackendServer({ host: listen.host, port: listen.port, projectPath });
+    const server = new AgentDockBackendServer({ host: listen.host, port: listen.port, projectPaths });
     server
       .start()
       .then(({ port }) => {
@@ -482,7 +520,11 @@ if (process.argv[1]?.endsWith("server.ts") || process.argv[1]?.endsWith("server.
               `for example -p 127.0.0.1:${port}:${port}; anything else puts the audit log on the network.`,
           );
         }
-        console.log(`Reading the audit log of ${projectPath} (${server.getAuditReader().databasePath})`);
+        for (const project of server.getProjects().all()) {
+          console.log(
+            `Reading the audit log of ${project.projectPath} (${project.reader.databasePath}) as "${project.id}"`,
+          );
+        }
         console.log(`WebSocket event stream ready at ws://${shown}:${port}/ws/events`);
       })
       .catch((err: unknown) => {
