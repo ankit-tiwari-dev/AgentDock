@@ -11,6 +11,7 @@ import {
   summarize,
   summarizeRules,
 } from "../lib/events";
+import Overview from "./overview";
 
 type Tab = "overview" | "activity" | "sessions" | "policies" | "guide" | "reviewer" | "coach";
 type Question = { id: string; question: string; whyItMatters: string; suggestedAnswers: string[] };
@@ -48,28 +49,78 @@ const EMPTY: DashboardSnapshot = {
 const API_ORIGIN =
   process.env.NEXT_PUBLIC_BACKEND_API_ORIGIN ||
   (process.env.NODE_ENV === "development" ? "http://127.0.0.1:45820" : "");
-const NAV: { id: Tab; label: string; icon: string; group: string }[] = [
-  { id: "overview", label: "Overview", icon: "◫", group: "WORKSPACE" },
-  { id: "activity", label: "Live activity", icon: "⌁", group: "WORKSPACE" },
-  { id: "sessions", label: "Agent sessions", icon: "◉", group: "WORKSPACE" },
-  { id: "policies", label: "Policy activity", icon: "⬡", group: "GOVERNANCE" },
-  { id: "guide", label: "Product guide", icon: "✳", group: "GOVERNANCE" },
-  { id: "reviewer", label: "Code explainer", icon: "⌕", group: "GOVERNANCE" },
-  { id: "coach", label: "Prompt coach", icon: "✧", group: "GOVERNANCE" },
+const NAV_GROUPS = ["Monitor", "Supervisor"] as const;
+const NAV: { id: Tab; label: string; group: (typeof NAV_GROUPS)[number] }[] = [
+  { id: "overview", label: "Overview", group: "Monitor" },
+  { id: "activity", label: "Live stream", group: "Monitor" },
+  { id: "sessions", label: "Sessions", group: "Monitor" },
+  { id: "policies", label: "Policies", group: "Monitor" },
+  { id: "guide", label: "Product guide", group: "Supervisor" },
+  { id: "reviewer", label: "Code explainer", group: "Supervisor" },
+  { id: "coach", label: "Prompt coach", group: "Supervisor" },
 ];
 
-function Icon({ children }: { children: string }) {
+function NavIcon({ tab }: { tab: Tab }) {
+  const shapes: Record<Tab, React.ReactNode> = {
+    overview: (
+      <>
+        <rect x="3" y="3" width="7" height="9" rx="1" />
+        <rect x="14" y="3" width="7" height="5" rx="1" />
+        <rect x="14" y="12" width="7" height="9" rx="1" />
+        <rect x="3" y="16" width="7" height="5" rx="1" />
+      </>
+    ),
+    activity: <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />,
+    sessions: (
+      <>
+        <rect x="2" y="4" width="20" height="16" rx="2" />
+        <polyline points="6 9 9 12 6 15" />
+        <line x1="12" y1="15" x2="17" y2="15" />
+      </>
+    ),
+    policies: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
+    guide: (
+      <>
+        <circle cx="12" cy="12" r="10" />
+        <path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3" />
+        <line x1="12" y1="17" x2="12.01" y2="17" />
+      </>
+    ),
+    reviewer: (
+      <>
+        <polyline points="16 18 22 12 16 6" />
+        <polyline points="8 6 2 12 8 18" />
+      </>
+    ),
+    coach: <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />,
+  };
   return (
-    <span aria-hidden="true" className="icon">
-      {children}
-    </span>
+    <svg
+      aria-hidden="true"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {shapes[tab]}
+    </svg>
   );
 }
+
+function projectLabel(path: string | undefined): string {
+  return path?.split(/[\\/]/).filter(Boolean).pop() || "No project";
+}
+
 export default function Dashboard() {
   const [tab, setTab] = useState<Tab>("overview");
   const [snapshot, setSnapshot] = useState(EMPTY);
   const [connected, setConnected] = useState(false);
   const [backendReachable, setBackendReachable] = useState(false);
+  const [checked, setChecked] = useState(false);
   const [codexEnabled, setCodexEnabled] = useState(false);
   const [filter, setFilter] = useState("All events");
   const [search, setSearch] = useState("");
@@ -102,6 +153,8 @@ export default function Dashboard() {
         }
       } catch {
         if (!disposed) setBackendReachable(false);
+      } finally {
+        if (!disposed) setChecked(true);
       }
     };
     const connect = () => {
@@ -130,6 +183,8 @@ export default function Dashboard() {
         socket.onclose = () => {
           if (!disposed) {
             setConnected(false);
+            // A closed socket usually means the backend stopped; the failed fetch is what shows the offline banner.
+            void refresh();
             retry = setTimeout(connect, 2000);
           }
         };
@@ -246,95 +301,72 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="app-shell">
-      <aside className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
-        <div className="brand">
-          <div className="brand-mark">
-            <span>⌘</span>
-            <i />
+    <div className="ad-shell">
+      <nav className={`ad-side ${mobileOpen ? "ad-side-open" : ""}`} aria-label="Main">
+        <div className="ad-brand">
+          <div className="ad-logo" aria-hidden="true">
+            AD
           </div>
-          <div>
-            <strong>agentdock</strong>
-            <small>DEVELOPER CONTROL PLANE</small>
+          <div className="ad-brand-text">
+            <strong>AgentDock</strong>
+            <small title={snapshot.source?.projectPath}>{projectLabel(snapshot.source?.projectPath)}</small>
           </div>
-          <button className="mobile-close" onClick={() => setMobileOpen(false)} aria-label="Close menu">
-            ×
+          <button
+            type="button"
+            className="ad-menu-btn"
+            aria-expanded={mobileOpen}
+            aria-controls="ad-menu"
+            aria-label={mobileOpen ? "Close menu" : "Open menu"}
+            onClick={() => setMobileOpen(!mobileOpen)}
+          >
+            <svg
+              aria-hidden="true"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            >
+              <line x1="4" y1="6" x2="20" y2="6" />
+              <line x1="4" y1="12" x2="20" y2="12" />
+              <line x1="4" y1="18" x2="20" y2="18" />
+            </svg>
           </button>
         </div>
-        <div className="workspace-switch">
-          <div className="workspace-avatar">A</div>
-          <div className="workspace-name">
-            <strong>Local workspace</strong>
-            <small>Live hook telemetry</small>
-          </div>
-          <span className={`connection-dot ${connected ? "" : "connection-off"}`} />
-        </div>
-        <div className="side-nav">
-          {["WORKSPACE", "GOVERNANCE"].map((group) => (
-            <div key={group}>
-              <div className="nav-heading">{group}</div>
+        <div className="ad-menu" id="ad-menu">
+          {NAV_GROUPS.map((group) => (
+            <div className="ad-group" key={group}>
+              <span className="ad-group-h">{group}</span>
               {NAV.filter((item) => item.group === group).map((item) => (
                 <button
                   key={item.id}
+                  type="button"
+                  className="ad-nav"
+                  aria-current={tab === item.id ? "page" : undefined}
                   onClick={() => {
                     setTab(item.id);
                     setMobileOpen(false);
                   }}
-                  className={`nav-item ${tab === item.id ? "nav-active" : ""}`}
                 >
-                  <Icon>{item.icon}</Icon>
-                  <span>{item.label}</span>
-                  {item.id === "activity" && connected && <span className="nav-live-dot" />}
+                  <NavIcon tab={item.id} />
+                  {item.label}
                 </button>
               ))}
             </div>
           ))}
-        </div>
-        <div className="sidebar-spacer" />
-        <div className="sidebar-session">
-          <div className="session-orbit">
-            <span>⌁</span>
-          </div>
-          <div>
-            <strong>{connected ? "Live stream connected" : "Stream reconnecting"}</strong>
-            <small>
-              {backendReachable ? `${snapshot.counts.totalEvents} events stored locally` : "Waiting for backend"}
-            </small>
-          </div>
-          <span className={`green-dot ${backendReachable ? "" : "connection-off"}`} />
-        </div>
-        <div className="profile">
-          <div className="profile-avatar">AD</div>
-          <div className="profile-details">
-            <strong>AgentDock</strong>
-            <small>Local supervisor</small>
+          <div className="ad-side-foot">
+            <span className="ad-health">
+              <span className={`ad-hdot ${backendReachable ? "" : "ad-hdot-off"}`} aria-hidden="true" />
+              {backendReachable ? "Backend reachable" : checked ? "Backend not reachable" : "Checking backend"}
+            </span>
+            <span>{snapshot.counts.totalEvents.toLocaleString()} events stored locally</span>
           </div>
         </div>
-      </aside>
+      </nav>
 
-      <main className="main-shell">
-        <header className="topbar">
-          <div className="breadcrumbs">
-            <button className="mobile-menu" onClick={() => setMobileOpen(true)} aria-label="Open menu">
-              ☰
-            </button>
-            <span>Workspace</span>
-            <Icon>›</Icon>
-            <strong>{title}</strong>
-          </div>
-          <div className="top-actions">
-            <div className={`connection ${connected ? "connected" : "reconnecting"}`}>
-              <span className="connection-dot" />
-              {connected ? "Live stream connected" : "Waiting for backend"}
-            </div>
-            <button
-              className="help-button"
-              onClick={() => setToast("Start AgentDock backend and install CLI hooks to receive real telemetry.")}
-            >
-              ? <span>Setup</span>
-            </button>
-          </div>
-        </header>
+      <main className="ad-main">
         <div className="content-wrap">
           {backendReachable && snapshot.source && !snapshot.source.available && (
             <div className="panel notice-panel" role="status">
@@ -346,82 +378,26 @@ export default function Dashboard() {
               </p>
             </div>
           )}
-          <div className="page-heading">
-            <div>
-              <div className="eyebrow">
-                <span className="eyebrow-line" />
-                LOCAL AGENT OPERATIONS
+          {tab === "overview" ? (
+            <Overview
+              snapshot={snapshot}
+              connected={connected}
+              backendReachable={backendReachable}
+              checked={checked}
+              onCopy={copy}
+              onOpenStream={() => setTab("activity")}
+            />
+          ) : (
+            <div className="page-heading">
+              <div>
+                <div className="eyebrow">
+                  <span className="eyebrow-line" />
+                  LOCAL AGENT OPERATIONS
+                </div>
+                <h1>{title}</h1>
+                <p>{sectionDescription(tab)}</p>
               </div>
-              <h1>{tab === "overview" ? "Agent activity" : title}</h1>
-              <p>
-                {tab === "overview"
-                  ? "Live events and sessions reported by your installed agent hooks."
-                  : sectionDescription(tab)}
-              </p>
             </div>
-            {tab === "overview" && (
-              <button className="primary-button" onClick={() => setTab("sessions")}>
-                <span>⌘</span> Connect an agent <kbd>→</kbd>
-              </button>
-            )}
-          </div>
-
-          {tab === "overview" && (
-            <>
-              <section className="metric-grid">
-                <Metric label="Active sessions" value={snapshot.counts.activeSessions} icon="◉" tone="violet" />
-                <Metric label="Tool calls" value={snapshot.counts.toolCalls} icon="⌁" tone="blue" />
-                <Metric label="Blocked calls" value={snapshot.counts.blockedCalls} icon="⊘" tone="rose" />
-                <Metric label="Needs approval" value={snapshot.counts.reviewCalls} icon="◇" tone="amber" />
-              </section>
-              <section className="overview-grid">
-                <div className="panel activity-panel">
-                  <div className="panel-heading">
-                    <div>
-                      <h2>Recent hook events</h2>
-                      <p>Policy decisions and tool lifecycle events received from the CLI</p>
-                    </div>
-                    <button className="text-button" onClick={() => setTab("activity")}>
-                      View activity <span>↗</span>
-                    </button>
-                  </div>
-                  <div className="event-list">
-                    {snapshot.events.slice(0, 6).map((event) => (
-                      <EventRow key={event.id} event={event} />
-                    ))}
-                    {snapshot.events.length === 0 && (
-                      <EmptyState
-                        title="No hook events received"
-                        body="Install AgentDock hooks in a project, then run an agent tool call. Events appear here as they happen."
-                      />
-                    )}
-                  </div>
-                </div>
-                <div className="panel session-panel">
-                  <div className="panel-heading">
-                    <div>
-                      <h2>Agent sessions</h2>
-                      <p>Sessions reported by your agent hooks</p>
-                    </div>
-                    <button className="text-button" onClick={() => setTab("sessions")}>
-                      View all <span>↗</span>
-                    </button>
-                  </div>
-                  <div className="session-list">
-                    {snapshot.sessions.slice(0, 5).map((session) => (
-                      <SessionRow key={session.id} session={session} />
-                    ))}
-                    {snapshot.sessions.length === 0 && (
-                      <EmptyState
-                        title="No sessions yet"
-                        body="A session is recorded when an installed agent hook runs."
-                      />
-                    )}
-                  </div>
-                  <ConnectHint onCopy={copy} />
-                </div>
-              </section>
-            </>
           )}
 
           {tab === "activity" && (
@@ -819,37 +795,13 @@ export default function Dashboard() {
             </section>
           )}
         </div>
-        <footer className="footer">
-          <span>AgentDock · Local telemetry</span>
-          <span>
-            <i className={`green-dot ${backendReachable ? "" : "connection-off"}`} />{" "}
-            {backendReachable ? "Backend reachable" : "Backend unavailable"}
-          </span>
-          <span>{snapshot.counts.totalEvents} events stored</span>
-        </footer>
       </main>
-      {mobileOpen && <button className="scrim" onClick={() => setMobileOpen(false)} aria-label="Close navigation" />}
       {toast && (
         <div role="status" className="toast">
           <span>✓</span>
           {toast}
         </div>
       )}
-    </div>
-  );
-}
-
-function Metric({ label, value, icon, tone }: { label: string; value: number; icon: string; tone: string }) {
-  return (
-    <div className="metric-card">
-      <div className="metric-top">
-        <span>{label}</span>
-        <span className={`metric-icon ${tone}`}>{icon}</span>
-      </div>
-      <div className="metric-value">{value.toLocaleString()}</div>
-      <div className="metric-bottom">
-        <span>reported by local agent hooks</span>
-      </div>
     </div>
   );
 }

@@ -43,3 +43,15 @@ Each entry: the decision, why, and what it rules out.
 - Refusing other `AGENTDOCK_HOST` values keeps a typo or a network card's address from putting the dashboard on the network outside Docker.
 
 **Rules out:** opening the dashboard from another machine; a published port that differs from the container's port (the `Host` check expects the server's own port, so `AGENTDOCK_PORT` sets both); Codex CLI inside the image. Linux and macOS hosts were not tested by hand; CI runs the smoke test on Linux.
+
+## D-6 · "Needs you" shows approval requests from the last 15 minutes
+
+**Decision:** the Overview's "Needs you" card lists tool calls whose verdict was `REQUIRE_MANUAL_APPROVAL` and that happened in the last 15 minutes, newest first, and tells the developer to answer in that agent. The "Asked for approval" card shows the all-time count next to how many fall in that window.
+
+**Why:**
+
+- The audit log records that an agent asked, not whether the developer answered. Listing every request ever made would show long-answered ones as waiting.
+- An agent waits at its permission prompt while the developer is at the keyboard, so a request older than 15 minutes has almost always been answered or abandoned. The window is `APPROVAL_WINDOW_MS` in `frontend/src/lib/events.ts`.
+- The agent's own prompt is where the answer goes today, so the card points there instead of offering a button that cannot act.
+
+**Rules out:** approving or denying from the dashboard; showing a request as answered. Both need the CLI to record the answer first.
