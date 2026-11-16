@@ -9,11 +9,11 @@ The supervisor itself (hooks, policy engine, audit trail, context packs) lives i
 
 ## What is here
 
-| Workspace    | What it is                                                                                                                                                                                                                                       |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `backend/`   | A plain `node:http` server on `127.0.0.1:45820`. It reads a project's audit log, serves it as JSON and as a live WebSocket stream (`/ws/events`), runs the product guide, prompt coach and token cost endpoints, and serves the built dashboard. |
-| `frontend/`  | The dashboard, a Next.js app exported to static files in `frontend/out`: agent activity, sessions, policy decisions, the product guide, the code explainer and the prompt coach.                                                                 |
-| `extension/` | Sidebar webview, message handling and key storage for an editor extension. It is not yet a loadable extension: there is no `activate` entry point and no build step (`ISSUE.md` → I-6).                                                          |
+| Workspace    | What it is                                                                                                                                                                                                                         |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `backend/`   | A plain `node:http` server on `127.0.0.1:45820`. It reads a project's audit log, serves it as JSON and as a live WebSocket stream (`/ws/events`), runs the Plan & review and token cost endpoints, and serves the built dashboard. |
+| `frontend/`  | The dashboard, a Next.js app exported to static files in `frontend/out`: Overview, Waiting on you, Sessions, Rules, Plan & review and Project (`docs/DECISIONS.md` → D-7).                                                         |
+| `extension/` | Sidebar webview, message handling and key storage for an editor extension. It is not yet a loadable extension: there is no `activate` entry point and no build step (`ISSUE.md` → I-6).                                            |
 
 ### Where the data comes from
 
@@ -40,14 +40,14 @@ If the project has no audit log yet, the dashboard says so and shows the path it
 
 ### Settings
 
-| Variable                                 | Default         | Effect                                                                                                                                 |
-| ---------------------------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `--project <path>` / `AGENTDOCK_PROJECT` | current folder  | The project whose `.ctrlplane/audit.db` is shown.                                                                                      |
-| `AGENTDOCK_CODEX=1`                      | off             | The product guide and the code explainer run Codex CLI (read-only sandbox, one run at a time). Off, the guide uses built-in questions. |
-| `AGENTDOCK_CODEX_PATH`                   | found on `PATH` | The Codex CLI executable to run.                                                                                                       |
-| `AGENTDOCK_DEV_ORIGIN`                   | off             | Lets the Next.js dev server call the API, for example `http://localhost:3000`. Only a localhost or 127.0.0.1 address is accepted.      |
-| `AGENTDOCK_HOST`                         | `127.0.0.1`     | The address to listen on: `127.0.0.1`, `::1`, or `0.0.0.0` / `::` inside a container (see below). Anything else stops the backend.     |
-| `AGENTDOCK_PORT`                         | `45820`         | The port to listen on.                                                                                                                 |
+| Variable                                 | Default         | Effect                                                                                                                                     |
+| ---------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--project <path>` / `AGENTDOCK_PROJECT` | current folder  | The project whose `.ctrlplane/audit.db` is shown.                                                                                          |
+| `AGENTDOCK_CODEX=1`                      | off             | Plan & review runs Codex CLI to plan and to explain changes (read-only sandbox, one run at a time). Off, planning uses built-in questions. |
+| `AGENTDOCK_CODEX_PATH`                   | found on `PATH` | The Codex CLI executable to run.                                                                                                           |
+| `AGENTDOCK_DEV_ORIGIN`                   | off             | Lets the Next.js dev server call the API, for example `http://localhost:3000`. Only a localhost or 127.0.0.1 address is accepted.          |
+| `AGENTDOCK_HOST`                         | `127.0.0.1`     | The address to listen on: `127.0.0.1`, `::1`, or `0.0.0.0` / `::` inside a container (see below). Anything else stops the backend.         |
+| `AGENTDOCK_PORT`                         | `45820`         | The port to listen on.                                                                                                                     |
 
 ## Run with Docker
 

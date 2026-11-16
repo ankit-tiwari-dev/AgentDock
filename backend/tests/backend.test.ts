@@ -152,24 +152,17 @@ function createMockHttpPair(options: MockHttpHandlerOptions) {
   };
 }
 
-test("AgentDockBackendServer handles Coach and Cost routes", () => {
+test("regression: the removed prompt coach route answers 404", () => {
+  const server = new AgentDockBackendServer();
+  const pair = createMockHttpPair({ method: "POST", url: "/api/coach/analyze", body: { prompt: "fix it" } });
+  server.handleHttpRequest(pair.req, pair.res);
+  assert.equal(pair.getStatusCode(), 404);
+});
+
+test("AgentDockBackendServer handles the Cost route", () => {
   const server = new AgentDockBackendServer();
 
-  // 1. Test Coach route logic
-  const coachPair = createMockHttpPair({
-    method: "POST",
-    url: "/api/coach/analyze",
-    body: { prompt: "fix it" },
-  });
-
-  server.handleHttpRequest(coachPair.req, coachPair.res);
-
-  assert.equal(coachPair.getStatusCode(), 200);
-  const coachData = coachPair.getJson<{ score: number; rating: string }>();
-  assert.equal(coachData.rating, "HIGH_RISK");
-  assert.ok(coachData.score < 50);
-
-  // 2. Test Cost route logic
+  // Test Cost route logic
   const costPair = createMockHttpPair({
     method: "POST",
     url: "/api/cost/calculate",

@@ -29,11 +29,11 @@ type Props = {
   backendReachable: boolean;
   checked: boolean;
   onCopy: (text: string, label: string) => void;
-  onOpenStream: () => void;
 };
 
-export default function Overview({ snapshot, connected, backendReachable, checked, onCopy, onOpenStream }: Props) {
+export default function Overview({ snapshot, connected, backendReachable, checked, onCopy }: Props) {
   const [filter, setFilter] = useState<StreamFilter>("all");
+  const [showAll, setShowAll] = useState(false);
   const [query, setQuery] = useState("");
   const [frozen, setFrozen] = useState<DashboardEvent[] | null>(null);
   const [selected, setSelected] = useState<DashboardEvent | null>(null);
@@ -118,16 +118,6 @@ export default function Overview({ snapshot, connected, backendReachable, checke
           </button>
         </div>
       </div>
-
-      {checked && !backendReachable && (
-        <div className="ov-banner" role="alert">
-          <WarnIcon />
-          <span>
-            Can&apos;t reach the AgentDock backend. Showing the last data loaded and retrying on its own. Your agents
-            are still supervised: rules run in the CLI, not in this page.
-          </span>
-        </div>
-      )}
 
       <section className="ov-metrics" aria-label="Totals">
         <div className="ov-card">
@@ -254,7 +244,7 @@ export default function Overview({ snapshot, connected, backendReachable, checke
                 <span>Rule</span>
               </div>
               <ul>
-                {visible.slice(0, STREAM_ROWS).map((event) => (
+                {(showAll ? visible : visible.slice(0, STREAM_ROWS)).map((event) => (
                   <li key={event.id}>
                     <StreamRow event={event} fresh={fresh.has(event.id)} onOpen={() => setSelected(event)} />
                   </li>
@@ -265,9 +255,9 @@ export default function Overview({ snapshot, connected, backendReachable, checke
 
           {visible.length > STREAM_ROWS && (
             <div className="ov-stream-foot">
-              Showing the newest {STREAM_ROWS} of {visible.length}.{" "}
-              <button type="button" className="ov-link" onClick={onOpenStream}>
-                Open the live stream
+              {showAll ? `Showing all ${visible.length}.` : `Showing the newest ${STREAM_ROWS} of ${visible.length}.`}{" "}
+              <button type="button" className="ov-link" onClick={() => setShowAll(!showAll)}>
+                {showAll ? `Show the newest ${STREAM_ROWS}` : `Show all ${visible.length}`}
               </button>
             </div>
           )}
@@ -282,9 +272,9 @@ export default function Overview({ snapshot, connected, backendReachable, checke
                   <ApprovalItem key={event.id} event={event} />
                 ))}
                 {waiting.length > NEEDS_SHOWN && (
-                  <button type="button" className="ov-btn ov-btn-sm" onClick={() => setFilter("Needs approval")}>
-                    {waiting.length - NEEDS_SHOWN} more waiting. Show approval requests
-                  </button>
+                  <a className="ov-btn ov-btn-sm" href="#waiting">
+                    {waiting.length - NEEDS_SHOWN} more waiting. See them all
+                  </a>
                 )}
               </>
             ) : (
@@ -360,7 +350,7 @@ function StreamRow({ event, fresh, onOpen }: { event: DashboardEvent; fresh: boo
   );
 }
 
-function StatusChip({ status }: { status: string }) {
+export function StatusChip({ status }: { status: string }) {
   return (
     <span className={`ov-chip ov-chip-${statusTone(status)}`}>
       <StatusIcon status={status} />
@@ -403,7 +393,7 @@ function SessionLine({ session, now }: { session: DashboardSession; now: number 
   );
 }
 
-function EventDetail({
+export function EventDetail({
   event,
   onClose,
   fallbackFocus,
@@ -504,7 +494,7 @@ function ruleName(event: DashboardEvent): string {
   return event.ruleId ?? "";
 }
 
-function clock(time: number): string {
+export function clock(time: number): string {
   return new Date(time).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
@@ -605,7 +595,7 @@ function CloseIcon() {
   );
 }
 
-function WarnIcon() {
+export function WarnIcon() {
   return (
     <Svg size={18}>
       <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />

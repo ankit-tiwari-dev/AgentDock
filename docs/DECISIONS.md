@@ -26,11 +26,11 @@ Each entry: the decision, why, and what it rules out.
 
 ## D-3 · Codex runs only when turned on
 
-**Decision:** the product guide and the code explainer call Codex CLI only when the backend starts with `AGENTDOCK_CODEX=1`, and one run at a time. Otherwise the guide uses the built-in interview and the explainer says how to turn Codex on.
+**Decision:** Plan & review calls Codex CLI, to plan and to explain changes, only when the backend starts with `AGENTDOCK_CODEX=1`, and one run at a time. Otherwise planning uses the built-in interview and explaining says how to turn Codex on.
 
 **Why:** each run is a paid model session that reads the repository and can take minutes. A dashboard click, or a stray request, should not start one by default.
 
-**Rules out:** the code explainer working out of the box.
+**Rules out:** explaining changes working out of the box.
 
 ## D-4 · In Docker, the port is published to 127.0.0.1 and the project is mounted read-only
 
@@ -63,3 +63,15 @@ Each entry: the decision, why, and what it rules out.
 - The agent's own prompt is where the answer goes today, so the card points there instead of offering a button that cannot act.
 
 **Rules out:** approving or denying from the dashboard; showing a request as answered. Both need the CLI to record the answer first.
+
+## D-7 · Six pages, and "Ran afterwards" instead of "approved"
+
+**Decision:** the dashboard has six pages: Overview, Waiting on you, Sessions, Rules, Plan & review and Project. The page is kept in the address hash. Waiting on you marks an approval request "Ran afterwards" when the same session later completed the same tool with the same target, and "No record it ran" otherwise; the sidebar count is the requests from the last 15 minutes (D-6) with no such record.
+
+**Why:**
+
+- The old Live stream page showed the same events as the Overview, and the prompt coach scored prompts without looking at the project or its agents, so both went, the coach's endpoint with it. The product guide and the code explainer were the two halves of one job, so they share a page.
+- A completed call is the only trace an approved request leaves in the audit log. "Ran afterwards" claims only what the log shows; it does not say the developer approved it, and "No record it ran" does not say it was denied.
+- The Rules page lists the rules that acted, from the events the backend sends; the full rule list lives in agentdock-cli, which the dashboard cannot read.
+
+**Rules out:** "Approved" or "Denied" labels, and a page of every rule with on/off switches, until the CLI records the answer and can export its rules.

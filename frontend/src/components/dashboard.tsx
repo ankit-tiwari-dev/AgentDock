@@ -1,46 +1,13 @@
 "use client";
 
-import { type FormEvent, useEffect, useMemo, useState } from "react";
-import {
-  type DashboardEvent,
-  type DashboardSession,
-  type DashboardSnapshot,
-  eventStatus,
-  relativeTime,
-  statusTone,
-  summarize,
-  projectName,
-  summarizeRules,
-} from "../lib/events";
-import Overview, { SETUP_COMMAND } from "./overview";
-
-type Tab = "overview" | "activity" | "sessions" | "policies" | "guide" | "reviewer" | "coach";
-type Question = { id: string; question: string; whyItMatters: string; suggestedAnswers: string[] };
-type LockedSpec = {
-  title: string;
-  overview: string;
-  specHash: string;
-  acceptanceCriteria: string[];
-  developerPrompt?: string;
-  instructionsForAgent2?: string;
-};
-/** Codex writes a developer prompt; the built-in supervisor writes instructions for the coding agent. */
-const handoffText = (spec: LockedSpec) => spec.developerPrompt ?? spec.instructionsForAgent2 ?? "";
-type Interview = { clarificationQuestions?: Question[]; lockedSpecification?: LockedSpec };
-type Review = {
-  summary: string;
-  changes: Array<{ file: string; explanation: string }>;
-  testsAndEvidence: string[];
-  risks: string[];
-  nextSteps: string[];
-};
-type CoachResult = {
-  score: number;
-  rating: string;
-  suggestedPrompt: string;
-  recommendations: string[];
-  detectedIssues: string[];
-};
+import { type ReactNode, useEffect, useState } from "react";
+import { type DashboardSnapshot, type Page, approvalRequests, pageFromHash, projectName } from "../lib/events";
+import Overview, { WarnIcon } from "./overview";
+import PlanReview from "./plan-review";
+import Project, { type Health } from "./project";
+import Rules from "./rules";
+import Sessions from "./sessions";
+import Waiting from "./waiting";
 
 const EMPTY: DashboardSnapshot = {
   events: [],
@@ -50,51 +17,49 @@ const EMPTY: DashboardSnapshot = {
 const API_ORIGIN =
   process.env.NEXT_PUBLIC_BACKEND_API_ORIGIN ||
   (process.env.NODE_ENV === "development" ? "http://127.0.0.1:45820" : "");
-const NAV_GROUPS = ["Monitor", "Supervisor"] as const;
-const NAV: { id: Tab; label: string; group: (typeof NAV_GROUPS)[number] }[] = [
+const NAV_GROUPS = ["Monitor", "Govern", "Supervisor", "Setup"] as const;
+const NAV: { id: Page; label: string; group: (typeof NAV_GROUPS)[number] }[] = [
   { id: "overview", label: "Overview", group: "Monitor" },
-  { id: "activity", label: "Live stream", group: "Monitor" },
+  { id: "waiting", label: "Waiting on you", group: "Monitor" },
   { id: "sessions", label: "Sessions", group: "Monitor" },
-  { id: "policies", label: "Policies", group: "Monitor" },
-  { id: "guide", label: "Product guide", group: "Supervisor" },
-  { id: "reviewer", label: "Code explainer", group: "Supervisor" },
-  { id: "coach", label: "Prompt coach", group: "Supervisor" },
+  { id: "rules", label: "Rules", group: "Govern" },
+  { id: "plan", label: "Plan & review", group: "Supervisor" },
+  { id: "project", label: "Project", group: "Setup" },
 ];
 
-function NavIcon({ tab }: { tab: Tab }) {
-  const shapes: Record<Tab, React.ReactNode> = {
-    overview: (
-      <>
-        <rect x="3" y="3" width="7" height="9" rx="1" />
-        <rect x="14" y="3" width="7" height="5" rx="1" />
-        <rect x="14" y="12" width="7" height="9" rx="1" />
-        <rect x="3" y="16" width="7" height="5" rx="1" />
-      </>
-    ),
-    activity: <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />,
-    sessions: (
-      <>
-        <rect x="2" y="4" width="20" height="16" rx="2" />
-        <polyline points="6 9 9 12 6 15" />
-        <line x1="12" y1="15" x2="17" y2="15" />
-      </>
-    ),
-    policies: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
-    guide: (
-      <>
-        <circle cx="12" cy="12" r="10" />
-        <path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3" />
-        <line x1="12" y1="17" x2="12.01" y2="17" />
-      </>
-    ),
-    reviewer: (
-      <>
-        <polyline points="16 18 22 12 16 6" />
-        <polyline points="8 6 2 12 8 18" />
-      </>
-    ),
-    coach: <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />,
-  };
+const ICONS: Record<Page, ReactNode> = {
+  overview: (
+    <>
+      <rect x="3" y="3" width="7" height="9" rx="1" />
+      <rect x="14" y="3" width="7" height="5" rx="1" />
+      <rect x="14" y="12" width="7" height="9" rx="1" />
+      <rect x="3" y="16" width="7" height="5" rx="1" />
+    </>
+  ),
+  waiting: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <polyline points="12 7 12 12 15 14" />
+    </>
+  ),
+  sessions: (
+    <>
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <polyline points="6 9 9 12 6 15" />
+      <line x1="12" y1="15" x2="17" y2="15" />
+    </>
+  ),
+  rules: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
+  plan: (
+    <>
+      <polyline points="9 11 12 14 20 6" />
+      <path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9" />
+    </>
+  ),
+  project: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
+};
+
+function NavIcon({ page }: { page: Page }) {
   return (
     <svg
       aria-hidden="true"
@@ -107,29 +72,37 @@ function NavIcon({ tab }: { tab: Tab }) {
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      {shapes[tab]}
+      {ICONS[page]}
     </svg>
   );
 }
 
 export default function Dashboard() {
-  const [tab, setTab] = useState<Tab>("overview");
+  const [page, setPage] = useState<Page>("overview");
   const [snapshot, setSnapshot] = useState(EMPTY);
+  const [health, setHealth] = useState<Health | null>(null);
   const [connected, setConnected] = useState(false);
   const [backendReachable, setBackendReachable] = useState(false);
   const [checked, setChecked] = useState(false);
-  const [codexEnabled, setCodexEnabled] = useState(false);
-  const [filter, setFilter] = useState("All events");
-  const [search, setSearch] = useState("");
   const [toast, setToast] = useState("");
-  const [prompt, setPrompt] = useState("");
-  const [coachPrompt, setCoachPrompt] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [coach, setCoach] = useState<CoachResult | null>(null);
-  const [interview, setInterview] = useState<Interview | null>(null);
-  const [review, setReview] = useState<Review | null>(null);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+
+  // The page lives in the address hash, so reload and Back keep the developer where they were.
+  useEffect(() => {
+    const sync = () => {
+      setPage(pageFromHash(window.location.hash));
+      setMobileOpen(false);
+    };
+    sync();
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 10_000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     let socket: WebSocket | undefined;
@@ -140,13 +113,14 @@ export default function Dashboard() {
         const response = await fetch(`${API_ORIGIN}/api/dashboard/state`, { cache: "no-store" });
         if (!response.ok) throw new Error("Dashboard API unavailable");
         const state = (await response.json()) as DashboardSnapshot;
-        const health = await fetch(`${API_ORIGIN}/api/health`, { cache: "no-store" })
-          .then((r) => r.json() as Promise<{ codexEnabled?: boolean }>)
-          .catch(() => ({ codexEnabled: false }));
+        const status = await fetch(`${API_ORIGIN}/api/health`, { cache: "no-store" })
+          .then((r) => r.json() as Promise<Health>)
+          .catch(() => null);
         if (!disposed) {
           setSnapshot(state);
+          setHealth(status);
           setBackendReachable(true);
-          setCodexEnabled(health.codexEnabled === true);
+          setNow(Date.now());
         }
       } catch {
         if (!disposed) setBackendReachable(false);
@@ -205,97 +179,14 @@ export default function Dashboard() {
     return () => clearTimeout(timer);
   }, [toast]);
 
-  const visibleEvents = useMemo(
-    () =>
-      snapshot.events.filter((event) => {
-        const status = eventStatus(event);
-        const matchesFilter = filter === "All events" || status === filter;
-        const text =
-          `${event.toolName || event.hookEventName} ${event.projectPath} ${event.reason || ""} ${summarize(event.toolInput)} ${event.agent} ${event.ruleId || ""}`.toLowerCase();
-        return matchesFilter && text.includes(search.toLowerCase());
-      }),
-    [snapshot.events, filter, search],
-  );
-  const title = NAV.find((item) => item.id === tab)?.label || "Overview";
-
-  async function postJson<T>(path: string, body: unknown): Promise<T> {
-    const response = await fetch(`${API_ORIGIN}${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) throw new Error((await response.json()).error || "Request failed");
-    return response.json() as Promise<T>;
-  }
-
-  async function runCoach(e: FormEvent) {
-    e.preventDefault();
-    if (!coachPrompt.trim()) return;
-    setBusy(true);
-    try {
-      setCoach(await postJson<CoachResult>("/api/coach/analyze", { prompt: coachPrompt }));
-    } catch {
-      setToast("Coach service is unavailable. Check that the AgentDock backend is running.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function askGuide(e: FormEvent) {
-    e.preventDefault();
-    if (!prompt.trim()) return;
-    setBusy(true);
-    setInterview(null);
-    try {
-      const result = await postJson<Interview & { isRefined?: boolean }>("/api/supervisor/interview", {
-        featurePrompt: prompt,
-      });
-      setInterview(result);
-      const questions = result.clarificationQuestions || [];
-      setAnswers(Object.fromEntries(questions.map((question) => [question.id, question.suggestedAnswers[0]])));
-    } catch (error) {
-      setToast(
-        error instanceof Error
-          ? error.message
-          : "The supervisor is unavailable. Check that the AgentDock backend is running.",
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function lockGuide() {
-    setBusy(true);
-    try {
-      setInterview(
-        await postJson<Interview>("/api/supervisor/interview", { featurePrompt: prompt, developerAnswers: answers }),
-      );
-      setToast("Specification locked and ready to review.");
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : "Could not finalize the specification.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function explainChanges() {
-    setBusy(true);
-    setReview(null);
-    try {
-      setReview(await postJson<Review>("/api/reviewer/explain", {}));
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : "Reviewer Codex is unavailable.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   function copy(text: string, label: string) {
     void navigator.clipboard
       .writeText(text)
       .then(() => setToast(`${label} copied.`))
       .catch(() => setToast("Clipboard access is unavailable."));
   }
+
+  const open = approvalRequests(snapshot.events, now).open;
 
   return (
     <div className="ad-shell">
@@ -337,19 +228,21 @@ export default function Dashboard() {
             <div className="ad-group" key={group}>
               <span className="ad-group-h">{group}</span>
               {NAV.filter((item) => item.group === group).map((item) => (
-                <button
+                <a
                   key={item.id}
-                  type="button"
+                  href={`#${item.id}`}
                   className="ad-nav"
-                  aria-current={tab === item.id ? "page" : undefined}
-                  onClick={() => {
-                    setTab(item.id);
-                    setMobileOpen(false);
-                  }}
+                  aria-current={page === item.id ? "page" : undefined}
+                  onClick={() => setMobileOpen(false)}
                 >
-                  <NavIcon tab={item.id} />
+                  <NavIcon page={item.id} />
                   {item.label}
-                </button>
+                  {item.id === "waiting" && open > 0 && (
+                    <span className="ad-badge" aria-label={`${open} with no record ${open === 1 ? "it" : "they"} ran`}>
+                      {open}
+                    </span>
+                  )}
+                </a>
               ))}
             </div>
           ))}
@@ -365,7 +258,16 @@ export default function Dashboard() {
 
       <main className="ad-main">
         <div className="content-wrap">
-          {backendReachable && snapshot.source && !snapshot.source.available && (
+          {checked && !backendReachable && (
+            <div className="ov-banner" role="alert">
+              <WarnIcon />
+              <span>
+                Can&apos;t reach the AgentDock backend. Showing the last data loaded and retrying on its own. Your
+                agents are still supervised: rules run in the CLI, not in this page.
+              </span>
+            </div>
+          )}
+          {backendReachable && snapshot.source && !snapshot.source.available && page !== "project" && (
             <div className="panel notice-panel" role="status">
               <strong>No audit log found</strong>
               <p>
@@ -375,421 +277,34 @@ export default function Dashboard() {
               </p>
             </div>
           )}
-          {tab === "overview" ? (
+          {page === "overview" && (
             <Overview
               snapshot={snapshot}
               connected={connected}
               backendReachable={backendReachable}
               checked={checked}
               onCopy={copy}
-              onOpenStream={() => setTab("activity")}
             />
-          ) : (
-            <div className="page-heading">
-              <div>
-                <div className="eyebrow">
-                  <span className="eyebrow-line" />
-                  LOCAL AGENT OPERATIONS
-                </div>
-                <h1>{title}</h1>
-                <p>{sectionDescription(tab)}</p>
-              </div>
-            </div>
           )}
-
-          {tab === "activity" && (
-            <section className="panel full-panel">
-              <div className="panel-heading activity-toolbar">
-                <div>
-                  <h2>Execution stream</h2>
-                  <p>{snapshot.counts.totalEvents.toLocaleString()} persisted hook events</p>
-                </div>
-                <div className="filter-tools">
-                  <label className="search-box">
-                    <span>⌕</span>
-                    <input
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      placeholder="Search tool, project, rule…"
-                    />
-                  </label>
-                  <select value={filter} onChange={(e) => setFilter(e.target.value)}>
-                    <option>All events</option>
-                    <option>Allowed</option>
-                    <option>Blocked</option>
-                    <option>Needs approval</option>
-                    <option>Guidance</option>
-                    <option>Observed</option>
-                    <option>Completed</option>
-                    <option>Failed</option>
-                  </select>
-                </div>
-              </div>
-              <div className="table-head">
-                <span>TOOL / EVENT</span>
-                <span>AGENT</span>
-                <span>DECISION</span>
-                <span>LATENCY</span>
-                <span>WHEN</span>
-              </div>
-              <div className="event-list table-list">
-                {visibleEvents.map((event) => (
-                  <EventRow key={event.id} event={event} detailed />
-                ))}
-                {visibleEvents.length === 0 && (
-                  <EmptyState
-                    title={snapshot.events.length ? "No matching events" : "Waiting for real events"}
-                    body={
-                      snapshot.events.length
-                        ? "Try another search or decision filter."
-                        : "Once the CLI sends hook telemetry, each tool call and policy result will appear here."
-                    }
-                  />
-                )}
-              </div>
-            </section>
+          {page === "waiting" && <Waiting snapshot={snapshot} now={now} />}
+          {page === "sessions" && <Sessions snapshot={snapshot} now={now} />}
+          {page === "rules" && <Rules snapshot={snapshot} onCopy={copy} />}
+          {page === "plan" && (
+            <PlanReview
+              apiOrigin={API_ORIGIN}
+              codexEnabled={health?.codexEnabled === true}
+              onCopy={copy}
+              onToast={setToast}
+            />
           )}
-
-          {tab === "sessions" && (
-            <section className="panel full-panel">
-              <div className="panel-heading">
-                <div>
-                  <h2>Recorded agent sessions</h2>
-                  <p>Sessions are created and updated by SessionStart, tool, and SessionEnd hooks.</p>
-                </div>
-              </div>
-              <div className="session-cards">
-                {snapshot.sessions.map((session) => (
-                  <SessionCard key={session.id} session={session} />
-                ))}
-                {snapshot.sessions.length === 0 && (
-                  <EmptyState
-                    title="No sessions recorded"
-                    body="From a project directory, run the CLI init command for your agent and start a session."
-                  />
-                )}
-              </div>
-              <div className="connect-panel">
-                <div>
-                  <h3>Connect a project</h3>
-                  <p>
-                    Run these commands from the project you want to supervise. This installs hooks in that project’s
-                    agent configuration.
-                  </p>
-                </div>
-                <ConnectHint onCopy={copy} />
-              </div>
-            </section>
-          )}
-
-          {tab === "policies" && (
-            <section className="panel full-panel">
-              <div className="panel-heading">
-                <div>
-                  <h2>Observed policy decisions</h2>
-                  <p>Rules appear here when a real hook event matches them. Configure policies with the CLI.</p>
-                </div>
-              </div>
-              <div className="policy-cards">
-                {summarizeRules(snapshot.events).map((rule) => (
-                  <PolicyCard key={rule.id} rule={rule} />
-                ))}
-                {summarizeRules(snapshot.events).length === 0 && (
-                  <EmptyState
-                    title="No matched rules recorded"
-                    body="A rule appears here once it blocks, steers or flags a tool call."
-                  />
-                )}
-              </div>
-              <div className="connect-panel">
-                <div>
-                  <h3>Policy configuration</h3>
-                  <p>Use the CLI to list, inspect, and change rule settings for the current project.</p>
-                </div>
-                <button className="secondary-button" onClick={() => copy("ctrlplane policies list", "Command")}>
-                  Copy command
-                </button>
-              </div>
-            </section>
-          )}
-
-          {tab === "guide" && (
-            <section className="guide-layout">
-              <div className="panel guide-panel">
-                <div className="guide-intro">
-                  <div className="guide-mark">✳</div>
-                  <div>
-                    <div className="eyebrow">{codexEnabled ? "CODEX SUPERVISOR" : "PRODUCT SUPERVISOR"}</div>
-                    <h2>
-                      Clarify the plan
-                      <br />
-                      before coding begins.
-                    </h2>
-                    <p>
-                      {codexEnabled
-                        ? "A read-only Codex session inspects this repository, asks product questions, and prepares a handoff for your separate developer Codex."
-                        : "Built-in questions pin down the product decisions before coding and produce a handoff for your coding agent. Restart the backend with AGENTDOCK_CODEX=1 to have a read-only Codex session inspect the repository instead."}
-                    </p>
-                  </div>
-                </div>
-                <form onSubmit={askGuide} className="form-stack">
-                  <label htmlFor="feature-prompt">What would you like to build?</label>
-                  <textarea
-                    id="feature-prompt"
-                    value={prompt}
-                    onChange={(e) => setPrompt(e.target.value)}
-                    rows={5}
-                    placeholder="Describe the feature or change…"
-                  />
-                  <div className="form-bottom">
-                    <span>
-                      {codexEnabled
-                        ? "Runs Codex CLI on this repository when submitted."
-                        : "Answered by the built-in supervisor."}
-                    </span>
-                    <button className="primary-button" disabled={busy || !prompt.trim()}>
-                      {busy ? (codexEnabled ? "Codex is reviewing…" : "Thinking…") : "Ask supervisor"} <span>→</span>
-                    </button>
-                  </div>
-                </form>
-                {interview?.clarificationQuestions && (
-                  <div className="question-stack">
-                    <div className="section-kicker">DECISIONS TO RESOLVE</div>
-                    {interview.clarificationQuestions.map((question, index) => (
-                      <div className="question-card" key={question.id}>
-                        <strong>
-                          <span>{String(index + 1).padStart(2, "0")}</span>
-                          {question.question}
-                        </strong>
-                        <p>{question.whyItMatters}</p>
-                        {question.suggestedAnswers.map((answer) => (
-                          <label className="choice" key={answer}>
-                            <input
-                              type="radio"
-                              name={question.id}
-                              checked={answers[question.id] === answer}
-                              onChange={() => setAnswers((current) => ({ ...current, [question.id]: answer }))}
-                            />
-                            <span>{answer}</span>
-                          </label>
-                        ))}
-                      </div>
-                    ))}
-                    <button
-                      className="primary-button"
-                      disabled={busy || !Object.keys(answers).length}
-                      onClick={lockGuide}
-                    >
-                      {busy ? "Preparing handoff…" : "Create developer handoff"} <span>→</span>
-                    </button>
-                  </div>
-                )}
-                {interview?.lockedSpecification && (
-                  <div className="locked-spec">
-                    <strong>✓ Developer handoff ready</strong>
-                    <small>{interview.lockedSpecification.specHash.slice(0, 12)}</small>
-                    <h3>{interview.lockedSpecification.title}</h3>
-                    <p>{interview.lockedSpecification.overview}</p>
-                    <ul>
-                      {interview.lockedSpecification.acceptanceCriteria.map((criterion) => (
-                        <li key={criterion}>{criterion}</li>
-                      ))}
-                    </ul>
-                    <h3>{codexEnabled ? "Prompt for your developer Codex" : "Handoff for your coding agent"}</h3>
-                    <pre className="role-output">{handoffText(interview.lockedSpecification)}</pre>
-                    <button
-                      className="secondary-button"
-                      onClick={() => copy(handoffText(interview.lockedSpecification!), "Developer handoff")}
-                    >
-                      Copy handoff
-                    </button>
-                  </div>
-                )}
-              </div>
-              <aside className="guide-aside">
-                <div className="panel">
-                  <span className="aside-label">WORKFLOW</span>
-                  <div className="workflow-step">
-                    <span>{backendReachable ? "✓" : "!"}</span>
-                    <div>
-                      <strong>{backendReachable ? "Backend available" : "Backend unavailable"}</strong>
-                      <p>
-                        {backendReachable
-                          ? "Supervisor requests run through the local service."
-                          : "Start the backend on port 45820."}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="workflow-step">
-                    <span>01</span>
-                    <div>
-                      <strong>Supervisor Codex</strong>
-                      <p>Inspects the repository read-only and asks contextual questions.</p>
-                    </div>
-                  </div>
-                  <div className="workflow-step">
-                    <span>02</span>
-                    <div>
-                      <strong>Your developer Codex</strong>
-                      <p>Paste the copied handoff into a separate interactive Codex session.</p>
-                    </div>
-                  </div>
-                  <div className="workflow-step">
-                    <span>03</span>
-                    <div>
-                      <strong>Code explainer</strong>
-                      <p>After implementation, ask the reviewer to explain the real diff.</p>
-                    </div>
-                  </div>
-                </div>
-              </aside>
-            </section>
-          )}
-
-          {tab === "reviewer" && (
-            <section className="guide-layout">
-              <div className="panel guide-panel">
-                <div className="guide-intro">
-                  <div className="guide-mark">⌕</div>
-                  <div>
-                    <div className="eyebrow">READ-ONLY CODEX REVIEWER</div>
-                    <h2>
-                      Understand what
-                      <br />
-                      the developer changed.
-                    </h2>
-                    <p>
-                      After your developer Codex finishes, a separate Codex CLI run inspects the current Git diff and
-                      explains it in plain English.
-                    </p>
-                  </div>
-                </div>
-                {!codexEnabled && (
-                  <p className="notice-inline">
-                    The explainer runs Codex CLI, which is turned off. Restart the backend with{" "}
-                    <code>AGENTDOCK_CODEX=1</code> to turn it on.
-                  </p>
-                )}
-                <button className="primary-button" disabled={busy || !codexEnabled} onClick={explainChanges}>
-                  {busy ? "Reviewer is inspecting…" : "Explain current changes"} <span>→</span>
-                </button>
-                {review && (
-                  <div className="role-review">
-                    <div className="review-summary">
-                      <span className="section-kicker">SUMMARY</span>
-                      <p>{review.summary}</p>
-                    </div>
-                    <div className="review-block">
-                      <h3>Files and behavior</h3>
-                      {review.changes.length ? (
-                        review.changes.map((change) => (
-                          <article key={change.file}>
-                            <strong>{change.file}</strong>
-                            <p>{change.explanation}</p>
-                          </article>
-                        ))
-                      ) : (
-                        <p>No changed files were reported.</p>
-                      )}
-                    </div>
-                    <div className="review-columns">
-                      <ReviewList title="Tests and evidence" items={review.testsAndEvidence} />
-                      <ReviewList title="Risks" items={review.risks} />
-                      <ReviewList title="Next steps" items={review.nextSteps} />
-                    </div>
-                  </div>
-                )}
-              </div>
-              <aside className="guide-aside">
-                <div className="panel">
-                  <span className="aside-label">REVIEW FLOW</span>
-                  <div className="workflow-step">
-                    <span>01</span>
-                    <div>
-                      <strong>Finish coding first</strong>
-                      <p>Run your interactive developer Codex and review its result.</p>
-                    </div>
-                  </div>
-                  <div className="workflow-step">
-                    <span>02</span>
-                    <div>
-                      <strong>Request explanation</strong>
-                      <p>The reviewer reads git status, git diff, and changed files without editing.</p>
-                    </div>
-                  </div>
-                </div>
-              </aside>
-            </section>
-          )}
-
-          {tab === "coach" && (
-            <section className="coach-layout">
-              <div className="panel coach-panel">
-                <div className="guide-mark">✧</div>
-                <div className="eyebrow">PROMPT COACH</div>
-                <h2>
-                  Review a prompt before
-                  <br />
-                  <span>sending it to an agent.</span>
-                </h2>
-                <p className="coach-copy">Analysis is returned by the local AgentDock coach endpoint.</p>
-                <form onSubmit={runCoach} className="form-stack">
-                  <label htmlFor="coach-prompt">Your prompt</label>
-                  <textarea
-                    id="coach-prompt"
-                    value={coachPrompt}
-                    onChange={(e) => setCoachPrompt(e.target.value)}
-                    rows={7}
-                    placeholder="Paste the task you are about to send…"
-                  />
-                  <div className="form-bottom">
-                    <span>Sent to the local backend.</span>
-                    <button className="primary-button" disabled={busy || !coachPrompt.trim()}>
-                      {busy ? "Analyzing…" : "Review prompt"} <span>→</span>
-                    </button>
-                  </div>
-                </form>
-                {coach && (
-                  <div className="coach-result">
-                    <div className="result-score">
-                      <strong>{coach.score}</strong>
-                      <span>/ 100</span>
-                      <i>{coach.rating.replaceAll("_", " ")}</i>
-                    </div>
-                    <div>
-                      <strong>Recommendations</strong>
-                      <ul>
-                        {coach.recommendations.map((item) => (
-                          <li key={item}>{item}</li>
-                        ))}
-                      </ul>
-                      {coach.detectedIssues.length > 0 && (
-                        <p className="coach-issues">{coach.detectedIssues.join(" · ")}</p>
-                      )}
-                      <button
-                        className="secondary-button"
-                        onClick={() => copy(coach.suggestedPrompt, "Refined prompt")}
-                      >
-                        Copy refined prompt
-                      </button>
-                    </div>
-                    <pre>{coach.suggestedPrompt}</pre>
-                  </div>
-                )}
-              </div>
-              <aside className="coach-benefits">
-                <div className="benefit">
-                  <span>⌕</span>
-                  <strong>Backend-derived result</strong>
-                  <p>The score and suggestions returned by your running service are shown here.</p>
-                </div>
-                <div className="benefit">
-                  <span>↻</span>
-                  <strong>Try another prompt</strong>
-                  <p>Submit updated wording to get a fresh analysis.</p>
-                </div>
-              </aside>
-            </section>
+          {page === "project" && (
+            <Project
+              snapshot={snapshot}
+              health={health}
+              connected={connected}
+              backendReachable={backendReachable}
+              onCopy={copy}
+            />
           )}
         </div>
       </main>
@@ -800,198 +315,5 @@ export default function Dashboard() {
         </div>
       )}
     </div>
-  );
-}
-
-function EventRow({ event, detailed = false }: { event: DashboardEvent; detailed?: boolean }) {
-  const status = eventStatus(event);
-  const action = event.toolName || event.hookEventName;
-  const target = event.toolInput ? summarize(event.toolInput) : event.projectPath;
-  return (
-    <details className="event-disclosure">
-      <summary>
-        <div className={`event-row ${detailed ? "event-row-detailed" : ""}`}>
-          <div className="event-main">
-            <span className={`event-glyph ${statusTone(status)}`}>
-              {event.hookEventName === "PostToolUse" ? "✓" : event.hookEventName === "PreToolUse" ? "⌘" : "◉"}
-            </span>
-            <div className="event-copy">
-              <div>
-                <strong>{action}</strong>
-                <span className="event-target">{target}</span>
-              </div>
-              <p>{event.reason || `${event.hookEventName} · ${event.projectPath || "Project path unavailable"}`}</p>
-              {detailed && (
-                <small>
-                  {event.sessionId} · {event.ruleId || "Not recorded"}
-                </small>
-              )}
-            </div>
-          </div>
-          {detailed && <span className="event-agent">{event.agent}</span>}
-          <span className={`status-badge ${statusTone(status)}`}>{status}</span>
-          {detailed && (
-            <>
-              <span className="event-latency">
-                {event.latencyMs === undefined ? "—" : `${event.latencyMs.toFixed(1)} ms`}
-              </span>
-              <span className="event-time">{relativeTime(event.timestamp)}</span>
-            </>
-          )}
-        </div>
-      </summary>
-      <div className="event-expanded">
-        <div className="event-metadata">
-          <span>
-            Agent<strong>{event.agent}</strong>
-          </span>
-          <span>
-            Session<strong>{event.sessionId}</strong>
-          </span>
-          <span>
-            Hook<strong>{event.hookEventName}</strong>
-          </span>
-          <span>
-            Project<strong>{event.projectPath || "Unavailable"}</strong>
-          </span>
-          <span>
-            Matched rule<strong>{event.ruleId || "Not recorded"}</strong>
-          </span>
-          <span>
-            Decision<strong>{event.decision || status}</strong>
-          </span>
-        </div>
-        {event.reason && <p className="event-reason">{event.reason}</p>}
-        <Payload label="Tool input" value={event.toolInput} />
-        <Payload label="Tool output" value={event.toolOutput} />
-      </div>
-    </details>
-  );
-}
-
-function Payload({ label, value }: { label: string; value: unknown }) {
-  if (value === undefined || value === null) return null;
-  const content = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-  return (
-    <div className="event-payload">
-      <strong>{label}</strong>
-      <pre>{content}</pre>
-    </div>
-  );
-}
-
-function SessionRow({ session }: { session: DashboardSession }) {
-  return (
-    <div className="session-row">
-      <div className={`agent-avatar ${session.agent.includes("claude") ? "orange" : "blue"}`}>
-        {session.agent === "claude-code" ? "✳" : "◈"}
-      </div>
-      <div className="session-info">
-        <div className="session-title">
-          <strong>{session.agent}</strong>
-          <span className={`session-state ${session.status === "active" ? "working" : "review"}`}>
-            <i />
-            {session.status}
-          </span>
-        </div>
-        <span>{session.projectPath || "Project path unavailable"}</span>
-        <small>
-          {session.toolCalls} tool calls · {session.blockedCalls} blocked
-        </small>
-      </div>
-      <span className="session-time">{relativeTime(session.lastActivity)}</span>
-    </div>
-  );
-}
-
-function SessionCard({ session }: { session: DashboardSession }) {
-  return (
-    <div className="session-card">
-      <SessionRow session={session} />
-      <div className="session-card-stats">
-        <div>
-          <span>TOOL CALLS</span>
-          <strong>{session.toolCalls}</strong>
-        </div>
-        <div>
-          <span>BLOCKED</span>
-          <strong>{session.blockedCalls}</strong>
-        </div>
-        <div>
-          <span>STARTED</span>
-          <strong>{new Date(session.startedAt).toLocaleString()}</strong>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PolicyCard({ rule }: { rule: { id: string; count: number; latestDecision: string; latestReason: string } }) {
-  return (
-    <div className="policy-card">
-      <div className={`policy-icon ${statusTone(rule.latestDecision)}`}>⬡</div>
-      <span className={`policy-state ${statusTone(rule.latestDecision)}`}>{rule.latestDecision}</span>
-      <h3>{rule.id}</h3>
-      <p>{rule.latestReason || "Matched by a recorded tool call."}</p>
-      <div className="policy-card-bottom">
-        <span>
-          {rule.count} observed match{rule.count === 1 ? "" : "es"}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function EmptyState({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="empty-state">
-      <strong>{title}</strong>
-      <p>{body}</p>
-    </div>
-  );
-}
-
-function ConnectHint({ onCopy }: { onCopy: (text: string, label: string) => void }) {
-  const command = SETUP_COMMAND;
-  return (
-    <div className="connect-hint">
-      <span>Run from your project:</span>
-      <code>{command}</code>
-      <button className="text-button" onClick={() => onCopy(command, "Setup command")}>
-        Copy
-      </button>
-    </div>
-  );
-}
-
-function ReviewList({ title, items }: { title: string; items: string[] }) {
-  return (
-    <div className="review-list">
-      <h3>{title}</h3>
-      {items.length ? (
-        <ul>
-          {items.map((item, index) => (
-            <li key={`${title}-${index}`}>{item}</li>
-          ))}
-        </ul>
-      ) : (
-        <p>None reported.</p>
-      )}
-    </div>
-  );
-}
-
-function sectionDescription(tab: Tab) {
-  return (
-    (
-      {
-        activity: "Live, persisted records of tool hooks and their policy decisions.",
-        sessions: "Agent sessions seen by your installed hooks.",
-        policies: "Policy rules observed in actual tool-call decisions.",
-        guide: "Resolve product decisions with a read-only Codex supervisor.",
-        reviewer: "Get a plain-English explanation from a separate read-only Codex reviewer.",
-        coach: "Analyze prompts through the local coach API.",
-      } as Record<string, string>
-    )[tab] || "AgentDock workspace."
   );
 }
