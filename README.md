@@ -111,4 +111,4 @@ Known bugs and open items: [`ISSUE.md`](ISSUE.md).
 
 ## License
 
-No license has been chosen yet (`ISSUE.md` → I-8).
+MIT. See [`LICENSE`](LICENSE).

@@ -50,10 +50,11 @@ Status flow: FOUND → IN PROGRESS → FIXED. Each entry: symptoms, root cause, 
 - **Fix:** the Next.js dashboard shows only data from the backend. The backend reads the project's `.ctrlplane/audit.db` (the file the CLI daemon writes on every hook call) through a read-only connection, serves it at `/api/dashboard/state`, and streams new rows over `/ws/events` once a second. Panels with no backing data were removed.
 - **Verification:** `backend/tests/audit-reader.test.ts` (mapping, counts, polling, read-only, a stopped daemon), `backend/tests/dashboard-api.test.ts` (the endpoint and the stream). By hand: the backend started with `--project` on a project with two recorded hook calls, opened in headless Edge, showed "2 events stored" and "Live stream connected".
 
-## I-8 · FOUND · No license file
+## I-8 · FIXED · No license file
 
 - **Symptoms:** the old README claimed MIT, but there is no `LICENSE`. Without one the code is not open source in practice.
-- **Fix (proposed):** the owner picks a license and adds `LICENSE`.
+- **Fix:** an MIT `LICENSE` file at the repo root (`docs/DECISIONS.md` → D-5). The README's License section names MIT and links to it.
+- **Verification:** the README's link target `LICENSE` exists, and `make ci` passes.
 
 ## I-9 · FIXED · The dashboard loaded Tailwind from a CDN with no version pin or integrity hash
 
