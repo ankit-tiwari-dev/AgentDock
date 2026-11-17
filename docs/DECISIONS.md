@@ -26,11 +26,11 @@ Each entry: the decision, why, and what it rules out.
 
 ## D-3 · Codex runs only when turned on
 
-**Decision:** the product guide and the code explainer call Codex CLI only when the backend starts with `AGENTDOCK_CODEX=1`, and one run at a time. Otherwise the guide uses the built-in interview and the explainer says how to turn Codex on.
+**Decision:** Plan & review calls Codex CLI, to plan and to explain changes, only when the backend starts with `AGENTDOCK_CODEX=1`, and one run at a time. Otherwise planning uses the built-in interview and explaining says how to turn Codex on.
 
 **Why:** each run is a paid model session that reads the repository and can take minutes. A dashboard click, or a stray request, should not start one by default.
 
-**Rules out:** the code explainer working out of the box.
+**Rules out:** explaining changes working out of the box.
 
 ## D-4 · In Docker, the port is published to 127.0.0.1 and the project is mounted read-only
 
@@ -43,3 +43,47 @@ Each entry: the decision, why, and what it rules out.
 - Refusing other `AGENTDOCK_HOST` values keeps a typo or a network card's address from putting the dashboard on the network outside Docker.
 
 **Rules out:** opening the dashboard from another machine; a published port that differs from the container's port (the `Host` check expects the server's own port, so `AGENTDOCK_PORT` sets both); Codex CLI inside the image. Linux and macOS hosts were not tested by hand; CI runs the smoke test on Linux.
+
+## D-5 · The code is MIT licensed
+
+**Decision:** the code is released under the MIT License (`LICENSE` at the repo root).
+
+**Why:** it makes the project open source with the fewest conditions for users and contributors: they only have to keep the copyright and license notice.
+
+**Rules out:** limits on reuse. Anyone may reuse the code, including commercially, with no obligation to share their changes.
+
+## D-6 · "Needs you" shows approval requests from the last 15 minutes
+
+**Decision:** the Overview's "Needs you" card lists tool calls whose verdict was `REQUIRE_MANUAL_APPROVAL` that happened in the last 15 minutes and have no record they ran (D-7), newest first, and tells the developer to answer in that agent. The "Asked for approval" card shows the all-time count next to how many fall in that window.
+
+**Why:**
+
+- The audit log records that an agent asked, not whether the developer answered. Listing every request ever made would show long-answered ones as waiting.
+- An agent waits at its permission prompt while the developer is at the keyboard, so a request older than 15 minutes has almost always been answered or abandoned. The window is `APPROVAL_WINDOW_MS` in `frontend/src/lib/events.ts`.
+- The agent's own prompt is where the answer goes today, so the card points there instead of offering a button that cannot act.
+
+**Rules out:** approving or denying from the dashboard; showing a request as answered. Both need the CLI to record the answer first.
+
+## D-7 · Six pages, and "Ran afterwards" instead of "approved"
+
+**Decision:** the dashboard has six pages: Overview, Waiting on you, Sessions, Rules, Plan & review and Project. The page is kept in the address hash. Waiting on you marks an approval request "Ran afterwards" when the same session later completed the same tool with the same target before asking for it again, and "No record it ran" otherwise; the sidebar count, and the Overview's "Needs you" card, are the requests from the last 15 minutes (D-6) with no such record.
+
+**Why:**
+
+- The old Live stream page showed the same events as the Overview, and the prompt coach scored prompts without looking at the project or its agents, so both went, the coach's endpoint with it. The product guide and the code explainer were the two halves of one job, so they share a page.
+- A completed call is the only trace an approved request leaves in the audit log. "Ran afterwards" claims only what the log shows; it does not say the developer approved it, and "No record it ran" does not say it was denied.
+- The Rules page lists the rules that acted, from the events the backend sends; the full rule list lives in agentdock-cli, which the dashboard cannot read.
+
+**Rules out:** "Approved" or "Denied" labels, and a page of every rule with on/off switches, until the CLI records the answer and can export its rules.
+
+## D-8 · Several projects come from repeated `--project` flags, and requests name them by id
+
+**Decision:** the backend watches every folder passed with `--project`, in order, one audit reader each. `GET /api/projects` lists them with an id made from the folder name. `GET /api/dashboard/state`, `POST /api/supervisor/interview` and `POST /api/reviewer/explain` take `?project=<id>`; without it they use the first project, and an unknown id is a 404. Every streamed audit event carries `project`. The dashboard shows a picker when there are two or more projects and keeps the pick in `?project=`.
+
+**Why:**
+
+- Flags need no config file and no write endpoint, so there is nothing new to store or secure.
+- A request names a project only by an id the backend gave out, so a web page can never make the backend read a folder it was not started with.
+- Defaulting to the first project keeps one-project setups, the Docker image and older pages working unchanged.
+
+**Rules out:** adding projects from the dashboard, remembering them across restarts, scanning folders, and an all-projects view.

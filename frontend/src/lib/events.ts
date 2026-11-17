@@ -41,6 +41,10 @@ export type RuleSummary = {
   latestDecision: string;
   latestReason: string;
   timestamp: number;
+  /** How many of the rule's calls got each verdict, keyed by the eventStatus label. */
+  counts: Record<string, number>;
+  /** The calls the rule acted on, newest first. */
+  events: DashboardEvent[];
 };
 
 export function eventStatus(event: DashboardEvent): string {
@@ -91,17 +95,22 @@ export function summarizeRules(events: DashboardEvent[]): RuleSummary[] {
     if (event.hookEventName !== "PreToolUse" || (event.decision === "ALLOW" && !event.observedOnly)) continue;
     const key = event.ruleId ?? event.reason?.split("\n")[0]?.trim();
     if (!key) continue;
+    const status = eventStatus(event);
     const current = rules.get(key);
     if (!current) {
       rules.set(key, {
         id: key,
         count: 1,
-        latestDecision: eventStatus(event),
+        latestDecision: status,
         latestReason: event.reason || "",
         timestamp: event.timestamp,
+        counts: { [status]: 1 },
+        events: [event],
       });
     } else {
       current.count++;
+      current.counts[status] = (current.counts[status] ?? 0) + 1;
+      current.events.push(event);
       if (event.timestamp > current.timestamp)
         Object.assign(current, {
           latestDecision: eventStatus(event),
@@ -110,6 +119,7 @@ export function summarizeRules(events: DashboardEvent[]): RuleSummary[] {
         });
     }
   }
+  for (const rule of rules.values()) rule.events.sort((a, b) => b.timestamp - a.timestamp);
   return [...rules.values()].sort((a, b) => b.timestamp - a.timestamp);
 }
 
@@ -118,4 +128,177 @@ export function statusTone(status: string): string {
   if (status === "Needs approval" || status === "REQUIRE_MANUAL_APPROVAL" || status === "Observed") return "review";
   if (status === "Guidance" || status === "INSTRUCT") return "guidance";
   return "allowed";
+}
+
+export type StreamFilter = "all" | "Blocked" | "Needs approval";
+
+/** The audit log does not record whether an approval was answered, so an older request is treated as no longer waiting. */
+export const APPROVAL_WINDOW_MS = 15 * 60 * 1000;
+
+const TARGET_KEYS = ["command", "file_path", "pattern", "path", "url", "query"];
+
+export function eventTarget(event: DashboardEvent): string {
+  const input = event.toolInput;
+  if (input === undefined || input === null) return "";
+  if (typeof input === "object") {
+    const fields = input as Record<string, unknown>;
+    for (const key of TARGET_KEYS) {
+      const value = fields[key];
+      if (typeof value === "string" && value) return value;
+    }
+  }
+  return summarize(input);
+}
+
+export function streamCounts(events: DashboardEvent[]): { all: number; blocked: number; approval: number } {
+  let blocked = 0;
+  let approval = 0;
+  for (const event of events) {
+    const status = eventStatus(event);
+    if (status === "Blocked") blocked++;
+    else if (status === "Needs approval") approval++;
+  }
+  return { all: events.length, blocked, approval };
+}
+
+export function filterStream(events: DashboardEvent[], filter: StreamFilter, query: string): DashboardEvent[] {
+  const needle = query.trim().toLowerCase();
+  return events.filter((event) => {
+    if (filter !== "all" && eventStatus(event) !== filter) return false;
+    if (!needle) return true;
+    const haystack = [
+      event.toolName || event.hookEventName,
+      eventTarget(event),
+      event.ruleId,
+      event.reason,
+      event.agent,
+      agentLabel(event.agent),
+    ]
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(needle);
+  });
+}
+
+export function recentApprovalRequests(events: DashboardEvent[], now = Date.now()): DashboardEvent[] {
+  return events
+    .filter((event) => eventStatus(event) === "Needs approval" && now - event.timestamp <= APPROVAL_WINDOW_MS)
+    .sort((a, b) => b.timestamp - a.timestamp);
+}
+
+export function unseenEvents(latest: DashboardEvent[], shown: DashboardEvent[]): DashboardEvent[] {
+  const seen = new Set(shown.map((event) => event.id));
+  return latest.filter((event) => !seen.has(event.id));
+}
+
+const AGENT_NAMES: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" };
+
+export function agentLabel(agent: string): string {
+  return AGENT_NAMES[agent] ?? agent;
+}
+
+/** Ids of rows that arrived since the last render. With no earlier rows (the first load) nothing counts as new. */
+export function newlyArrived(previous: Set<string> | null, shown: DashboardEvent[]): string[] {
+  if (!previous || previous.size === 0) return [];
+  return shown.filter((event) => !previous.has(event.id)).map((event) => event.id);
+}
+
+export function projectName(path: string | undefined): string {
+  return path?.split(/[\\/]/).filter(Boolean).pop() || "No project";
+}
+
+/** A project the backend watches, as `GET /api/projects` lists it. */
+export type ProjectSummary = { id: string; name: string; projectPath: string; available: boolean };
+
+export function projectFromSearch(search: string): string | null {
+  return new URLSearchParams(search).get("project");
+}
+
+export function projectQuery(id: string | null | undefined): string {
+  return id ? `?project=${encodeURIComponent(id)}` : "";
+}
+
+/** A message with no project comes from a backend that watches one project, so it is always for the page on screen. */
+export function isForProject(message: { project?: string }, shownId: string | null): boolean {
+  return !message.project || !shownId || message.project === shownId;
+}
+
+export const PAGES = ["overview", "waiting", "sessions", "rules", "plan", "project"] as const;
+export type Page = (typeof PAGES)[number];
+
+export function pageFromHash(hash: string): Page {
+  const name = hash.replace(/^#/, "");
+  return (PAGES as readonly string[]).includes(name) ? (name as Page) : "overview";
+}
+
+/**
+ * The audit log stores that a call asked for approval, not what the developer answered. A later completed call
+ * from the same session with the same tool and target is the only sign the request was allowed; it answers only
+ * the newest such request before it, so an earlier, denied request for the same command does not look run.
+ */
+export function ranAfterwards(request: DashboardEvent, events: DashboardEvent[]): boolean {
+  const target = eventTarget(request);
+  const same = (event: DashboardEvent) =>
+    event.sessionId === request.sessionId && event.toolName === request.toolName && eventTarget(event) === target;
+  const askedAgain = events
+    .filter(
+      (event) =>
+        event.id !== request.id &&
+        eventStatus(event) === "Needs approval" &&
+        event.timestamp > request.timestamp &&
+        same(event),
+    )
+    .reduce((first, event) => Math.min(first, event.timestamp), Infinity);
+  return events.some(
+    (event) =>
+      event.hookEventName === "PostToolUse" &&
+      event.timestamp >= request.timestamp &&
+      event.timestamp < askedAgain &&
+      same(event),
+  );
+}
+
+export function approvalRequests(
+  events: DashboardEvent[],
+  now = Date.now(),
+): { recent: DashboardEvent[]; earlier: DashboardEvent[]; waiting: DashboardEvent[]; open: number } {
+  const requests = events
+    .filter((event) => eventStatus(event) === "Needs approval")
+    .sort((a, b) => b.timestamp - a.timestamp);
+  const recent = requests.filter((event) => now - event.timestamp <= APPROVAL_WINDOW_MS);
+  const earlier = requests.filter((event) => now - event.timestamp > APPROVAL_WINDOW_MS);
+  const waiting = recent.filter((event) => !ranAfterwards(event, events));
+  return { recent, earlier, waiting, open: waiting.length };
+}
+
+export function sessionTimeline(events: DashboardEvent[], sessionId: string): DashboardEvent[] {
+  return events
+    .filter((event) => event.sessionId === sessionId && event.toolName)
+    .sort((a, b) => b.timestamp - a.timestamp);
+}
+
+export type StripMark = "allowed" | "guidance" | "approval" | "blocked" | "observed";
+
+const MARKS: Record<string, StripMark> = {
+  Allowed: "allowed",
+  Guidance: "guidance",
+  "Needs approval": "approval",
+  Blocked: "blocked",
+  Observed: "observed",
+};
+
+/** One mark per tool call a rule judged, oldest first, keeping the newest max so a long session stays one line. */
+export function verdictStrip(timeline: DashboardEvent[], max = 60): StripMark[] {
+  return timeline
+    .filter((event) => event.hookEventName === "PreToolUse")
+    .slice(0, max)
+    .reverse()
+    .map((event) => MARKS[eventStatus(event)] ?? "allowed");
+}
+
+export function formatUptime(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (hours) return `${hours} h ${minutes} min`;
+  return minutes ? `${minutes} min` : "under a minute";
 }

@@ -135,6 +135,18 @@ export class AuditReader {
     }
   }
 
+  /** The file exists and reads as SQLite; a half-written or foreign file does not count. */
+  public available(): boolean {
+    const db = this.open();
+    if (!db) return false;
+    try {
+      db.prepare("SELECT count(*) FROM sqlite_master").get();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private query(sql: string, ...params: (number | string)[]): Row[] {
     const db = this.open();
     if (!db) return [];
@@ -193,7 +205,7 @@ export class AuditReader {
     );
 
     return {
-      source: { projectPath: this.projectPath, databasePath: this.databasePath, available: this.open() !== undefined },
+      source: { projectPath: this.projectPath, databasePath: this.databasePath, available: this.available() },
       events,
       sessions,
       counts: {
