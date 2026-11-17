@@ -37,6 +37,10 @@ test("the page comes from the address hash, and anything unknown opens the Overv
   assert.equal(pageFromHash("#coach"), "overview");
 });
 
+test("the Settings page comes from #settings", () => {
+  assert.equal(pageFromHash("#settings"), "settings");
+});
+
 test("an approval request ran only if the same session later completed the same command", () => {
   const request = ask("a", "npm publish", 100);
   assert.equal(ranAfterwards(request, [done("d", "npm publish", 200), request]), true);

@@ -39,3 +39,17 @@ test("regression: every entry point named in a workspace package.json exists", (
     }
   }
 });
+
+test("regression: the Settings page has no key or base URL input", () => {
+  const text = readFileSync(join(srcDir, "components", "settings.tsx"), "utf8");
+  // Keys and the base URL are set only with the CLI, so the page can never send one to the backend.
+  assert.equal(/<textarea/.test(text), false, "textarea");
+  assert.equal(/type="password"/.test(text), false, "password field");
+  const inputs = text.match(/<input\b[\s\S]*?\/>/g) ?? [];
+  assert.ok(inputs.length >= 2, "the provider radios and the Codex model box were not found");
+  for (const input of inputs) {
+    assert.ok(/type="radio"[\s\S]*name="provider"/.test(input) || /id="st-model-input"/.test(input), input);
+  }
+  const bodies = text.match(/JSON\.stringify\([^)]*\)/g) ?? [];
+  assert.deepEqual(bodies, ["JSON.stringify({ provider: picked, model: chosenModel })"]);
+});

@@ -1,9 +1,10 @@
 "use client";
 
 import { type DashboardSnapshot, formatUptime } from "@/lib/events";
+import { type SupervisorHealth, supervisorLabel } from "@/lib/settings";
 import { CommandLine, PageHead } from "./page-parts";
 
-export type Health = { version?: string; uptimeSeconds?: number; codexEnabled?: boolean };
+export type Health = { version?: string; uptimeSeconds?: number; supervisor?: SupervisorHealth };
 
 const AGENTS = [
   ["Claude Code", "claude"],
@@ -76,16 +77,20 @@ export default function Project({
                 <span className="pg-warn">Not reachable</span>
               )}
             </dd>
-            <dt>Codex</dt>
+            <dt>Supervisor</dt>
             <dd>
-              {health?.codexEnabled ? (
+              {health?.supervisor?.provider ? (
                 <>
-                  <span className="pg-good">On</span>. Plan &amp; review asks a read-only Codex run.
+                  <span className={health.supervisor.ready ? "pg-good" : "pg-warn"}>
+                    {health.supervisor.ready ? "Ready" : "Not ready"}
+                  </span>
+                  . {supervisorLabel(health.supervisor).replace("Supervisor: ", "")}. Change it in{" "}
+                  <a href="#settings">Settings</a>.
                 </>
               ) : (
                 <>
-                  <span className="pg-warn">Off</span>. Plan &amp; review uses the built-in supervisor; set{" "}
-                  <code>AGENTDOCK_CODEX=1</code> to use Codex.
+                  <span className="pg-warn">Off</span>. Plan &amp; review uses the built-in supervisor. Turn one on with{" "}
+                  <code>ctrlplane supervisor use</code>.
                 </>
               )}
             </dd>

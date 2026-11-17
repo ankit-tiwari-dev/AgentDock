@@ -17,6 +17,7 @@ import PlanReview from "./plan-review";
 import Project, { type Health } from "./project";
 import Rules from "./rules";
 import Sessions from "./sessions";
+import Settings from "./settings";
 import Waiting from "./waiting";
 
 const EMPTY: DashboardSnapshot = {
@@ -35,6 +36,7 @@ const NAV: { id: Page; label: string; group: (typeof NAV_GROUPS)[number] }[] = [
   { id: "rules", label: "Rules", group: "Govern" },
   { id: "plan", label: "Plan & review", group: "Supervisor" },
   { id: "project", label: "Project", group: "Setup" },
+  { id: "settings", label: "Settings", group: "Setup" },
 ];
 
 const ICONS: Record<Page, ReactNode> = {
@@ -67,6 +69,14 @@ const ICONS: Record<Page, ReactNode> = {
     </>
   ),
   project: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
+  settings: (
+    <>
+      <line x1="4" y1="7" x2="20" y2="7" />
+      <line x1="4" y1="17" x2="20" y2="17" />
+      <circle cx="9" cy="7" r="2.5" fill="var(--side)" />
+      <circle cx="15" cy="17" r="2.5" fill="var(--side)" />
+    </>
+  ),
 };
 
 function NavIcon({ page }: { page: Page }) {
@@ -364,7 +374,7 @@ export default function Dashboard() {
           <div hidden={page !== "plan"}>
             <PlanReview
               apiOrigin={API_ORIGIN}
-              codexEnabled={health?.codexEnabled === true}
+              supervisor={health?.supervisor ?? null}
               project={shownProject}
               showProject={projects.length > 1}
               onCopy={copy}
@@ -380,6 +390,7 @@ export default function Dashboard() {
               onCopy={copy}
             />
           )}
+          {page === "settings" && <Settings apiOrigin={API_ORIGIN} onCopy={copy} onToast={setToast} />}
         </div>
       </main>
       {toast && (
