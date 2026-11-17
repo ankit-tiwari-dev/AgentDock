@@ -223,7 +223,7 @@ export function isForProject(message: { project?: string }, shownId: string | nu
   return !message.project || !shownId || message.project === shownId;
 }
 
-export const PAGES = ["overview", "waiting", "sessions", "rules", "plan", "project"] as const;
+export const PAGES = ["overview", "waiting", "sessions", "rules", "plan", "project", "settings"] as const;
 export type Page = (typeof PAGES)[number];
 
 export function pageFromHash(hash: string): Page {

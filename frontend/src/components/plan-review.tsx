@@ -2,6 +2,7 @@
 
 import { type FormEvent, useState } from "react";
 import { type ProjectSummary, projectQuery } from "@/lib/events";
+import { type SupervisorHealth, supervisorLabel } from "@/lib/settings";
 import { PageHead } from "./page-parts";
 
 type Question = { id: string; question: string; whyItMatters: string; suggestedAnswers: string[] };
@@ -22,19 +23,20 @@ type Review = {
   nextSteps: string[];
 };
 
-/** Codex writes a developer prompt; the built-in supervisor writes instructions for the coding agent. */
+/** An AI supervisor writes a developer prompt; the built-in one writes instructions for the coding agent. */
 const handoffText = (spec: LockedSpec) => spec.developerPrompt ?? spec.instructionsForAgent2 ?? "";
 
 type Props = {
   apiOrigin: string;
-  codexEnabled: boolean;
+  supervisor: SupervisorHealth | null;
   project: ProjectSummary | null;
   showProject: boolean;
   onCopy: (text: string, label: string) => void;
   onToast: (message: string) => void;
 };
 
-export default function PlanReview({ apiOrigin, codexEnabled, project, showProject, onCopy, onToast }: Props) {
+export default function PlanReview({ apiOrigin, supervisor, project, showProject, onCopy, onToast }: Props) {
+  const aiSupervisor = Boolean(supervisor?.provider);
   const [prompt, setPrompt] = useState("");
   const [interview, setInterview] = useState<Interview | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -145,9 +147,9 @@ export default function PlanReview({ apiOrigin, codexEnabled, project, showProje
               />
               <div className="pg-form-foot">
                 <span>
-                  {codexEnabled
-                    ? "A read-only Codex run reads this repository to ask its questions."
-                    : "Answered by the built-in supervisor. Codex is off."}
+                  {aiSupervisor
+                    ? `${supervisorLabel(supervisor)}. It reads this project to ask its questions.`
+                    : "Answered by the built-in supervisor. Turn on an AI supervisor with ctrlplane supervisor use."}
                 </span>
                 <button type="submit" className="ov-btn pg-primary" disabled={busy !== null || !prompt.trim()}>
                   {busy === "plan" ? "Asking the supervisor…" : "Ask the supervisor"}
@@ -197,7 +199,7 @@ export default function PlanReview({ apiOrigin, codexEnabled, project, showProje
                     <li key={criterion}>{criterion}</li>
                   ))}
                 </ul>
-                <h3>{codexEnabled ? "Prompt for your developer Codex" : "Handoff for your coding agent"}</h3>
+                <h3>{aiSupervisor ? "Prompt for your coding agent" : "Handoff for your coding agent"}</h3>
                 <pre className="ov-pre">{handoffText(spec)}</pre>
                 <button type="button" className="ov-btn ov-btn-sm" onClick={() => onCopy(handoffText(spec), "Handoff")}>
                   Copy handoff
@@ -215,21 +217,23 @@ export default function PlanReview({ apiOrigin, codexEnabled, project, showProje
             <div>
               <h2 id="pg-step-review">Explain the changes</h2>
               <p>
-                When the agent has finished, a separate read-only Codex run reads the git diff and explains each changed
-                file, the tests and the risks.
+                When the agent has finished, the supervisor reads the git diff and explains each changed file, the tests
+                and the risks.
               </p>
             </div>
           </div>
           <div className="pg-step-body">
-            {!codexEnabled && (
+            {!aiSupervisor && (
               <p className="pg-note pg-note-box">
-                Explaining needs Codex. Restart the backend with <code>AGENTDOCK_CODEX=1</code> to turn it on.
+                Explaining changes needs a supervisor. Run:{" "}
+                <code>ctrlplane supervisor use &lt;codex|claude|openai-compatible&gt; &lt;model&gt;</code>, or restart
+                the backend with <code>AGENTDOCK_CODEX=1</code> to use Codex.
               </p>
             )}
             <button
               type="button"
               className="ov-btn pg-primary"
-              disabled={busy !== null || !codexEnabled}
+              disabled={busy !== null || !aiSupervisor}
               onClick={explain}
             >
               {busy === "review" ? "Reading the changes…" : "Explain the changes"}

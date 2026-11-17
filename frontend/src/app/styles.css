@@ -1585,3 +1585,102 @@ button.ov-row:hover {
     min-height: 44px;
   }
 }
+
+/* Settings page */
+.st-col {
+  display: grid;
+  gap: 20px;
+  align-items: start;
+  min-width: 0;
+}
+.st-form {
+  margin: 0;
+  padding: 18px 20px 20px;
+  border-top: 1px solid var(--line-soft);
+}
+.st-form h3 {
+  margin: 0 0 2px;
+  font-size: 14px;
+  font-weight: 650;
+}
+.st-form fieldset {
+  min-width: 0;
+}
+.st-choice-text {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 0;
+}
+.st-choice-text small {
+  color: var(--subtle);
+  font-size: 12.5px;
+}
+.pg-choice input {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex: 0 0 auto;
+}
+.st-model,
+.st-base {
+  margin-top: 14px;
+}
+.st-select,
+.st-input {
+  width: 100%;
+  max-width: 360px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--side);
+  color: var(--text);
+  font: 12.5px var(--font-mono);
+}
+.st-select {
+  padding-right: 34px;
+  appearance: none;
+  cursor: pointer;
+  background: var(--side)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b96a3' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E")
+    no-repeat right 12px center;
+}
+.st-select:disabled,
+.st-input:disabled,
+.pg-choice input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.st-help {
+  margin: 6px 0 0;
+  color: var(--subtle);
+  font-size: 12.5px;
+}
+.st-base code {
+  font: 12.5px var(--font-mono);
+}
+.st-cmd-only {
+  margin-top: 8px;
+}
+.st-keys dd .pg-cmd {
+  margin-top: 8px;
+}
+.st-keys-note {
+  margin: 0;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: 12.5px;
+}
+@media (max-width: 860px) {
+  .st-select,
+  .st-input {
+    min-height: 44px;
+    max-width: none;
+  }
+  .pg-form-foot .ov-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}

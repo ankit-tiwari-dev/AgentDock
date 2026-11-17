@@ -24,13 +24,13 @@ Each entry: the decision, why, and what it rules out.
 
 **Exception:** `AGENTDOCK_DEV_ORIGIN` names the Next.js dev server (only a `http://localhost:<port>` or `http://127.0.0.1:<port>` address). That origin passes the check and gets CORS headers for itself. It is off by default, because many local tools listen on port 3000.
 
-## D-3 · Codex runs only when turned on
+## D-3 · An AI supervisor runs only when turned on
 
-**Decision:** Plan & review calls Codex CLI, to plan and to explain changes, only when the backend starts with `AGENTDOCK_CODEX=1`, and one run at a time. Otherwise planning uses the built-in interview and explaining says how to turn Codex on.
+**Decision:** Plan & review calls an AI supervisor (Codex, Claude or an OpenAI-compatible server), to plan and to explain changes, only when one is turned on: with `ctrlplane supervisor use`, or, when no `supervisor.json` exists, by starting the backend with `AGENTDOCK_CODEX=1`. One run at a time across every provider and project. Otherwise planning uses the built-in interview and explaining says how to turn a supervisor on.
 
 **Why:** each run is a paid model session that reads the repository and can take minutes. A dashboard click, or a stray request, should not start one by default.
 
-**Rules out:** explaining changes working out of the box.
+**Rules out:** explaining changes working out of the box, and turning a supervisor on from the dashboard (D-9).
 
 ## D-4 · In Docker, the port is published to 127.0.0.1 and the project is mounted read-only
 
@@ -76,6 +76,8 @@ Each entry: the decision, why, and what it rules out.
 
 **Rules out:** "Approved" or "Denied" labels, and a page of every rule with on/off switches, until the CLI records the answer and can export its rules.
 
+A seventh page, Settings, was added later (D-9).
+
 ## D-8 · Several projects come from repeated `--project` flags, and requests name them by id
 
 **Decision:** the backend watches every folder passed with `--project`, in order, one audit reader each. `GET /api/projects` lists them with an id made from the folder name. `GET /api/dashboard/state`, `POST /api/supervisor/interview` and `POST /api/reviewer/explain` take `?project=<id>`; without it they use the first project, and an unknown id is a 404. Every streamed audit event carries `project`. The dashboard shows a picker when there are two or more projects and keeps the pick in `?project=`.
@@ -87,3 +89,27 @@ Each entry: the decision, why, and what it rules out.
 - Defaulting to the first project keeps one-project setups, the Docker image and older pages working unchanged.
 
 **Rules out:** adding projects from the dashboard, remembering them across restarts, scanning folders, and an all-projects view.
+
+## D-9 · The dashboard may change the supervisor's provider and model, nothing else
+
+**Decision:** `POST /api/supervisor/settings` rewrites `$CTRLPLANE_HOME/supervisor.json` with a new provider and model. The body must be exactly `{provider, model}`; the route answers 409 when the file does not exist, 503 in Docker or when the file cannot be written, and 400 for `openai-compatible` without a saved base URL. It keeps the saved base URL and writes through a temp file and a rename. It passes the same Host, Origin and `application/json` checks as every POST (D-2) and never touches the keychain. A seventh dashboard page, Settings, uses it.
+
+**Why:**
+
+- Switching model is the setting people change most, and doing it in the terminal while looking at the dashboard is a detour.
+- A key or a base URL decides where code and keys are sent. Keeping both in the CLI means a page in the browser, or a request that slips past the Origin check, can never point a saved key at another server.
+- Writing only into a file that already exists keeps "turned on only from the terminal" (D-3).
+
+**Rules out:** setting or removing a key, setting the base URL, and creating `supervisor.json` from the dashboard. This amends D-8's "no write endpoint" for this one file.
+
+## D-10 · Claude through the official SDK, pinned and loaded only when used
+
+**Decision:** the Claude supervisor uses `@anthropic-ai/sdk` at an exact version, imported the first time a Claude run or model list happens. The Docker image ships without `node_modules`, and API providers refuse to run there. The Anthropic address is fixed, so `ANTHROPIC_BASE_URL` in the backend's environment cannot send the saved key elsewhere, and `ANTHROPIC_AUTH_TOKEN` is never sent.
+
+**Why:**
+
+- The SDK tracks the API's request shapes, streaming and error types; hand-written HTTP would drift from them.
+- An exact pin means an update is a reviewed change, not something that arrives with `npm install`.
+- A lazy import keeps every other path, and the image, free of a dependency only one provider needs.
+
+**Rules out:** other runtime dependencies for the backend without a new decision, and the Claude supervisor inside the container.

@@ -12,7 +12,7 @@ The supervisor itself (hooks, policy engine, audit trail, context packs) lives i
 | Workspace    | What it is                                                                                                                                                                                                                         |
 | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `backend/`   | A plain `node:http` server on `127.0.0.1:45820`. It reads a project's audit log, serves it as JSON and as a live WebSocket stream (`/ws/events`), runs the Plan & review and token cost endpoints, and serves the built dashboard. |
-| `frontend/`  | The dashboard, a Next.js app exported to static files in `frontend/out`: Overview, Waiting on you, Sessions, Rules, Plan & review and Project (`docs/DECISIONS.md` → D-7).                                                         |
+| `frontend/`  | The dashboard, a Next.js app exported to static files in `frontend/out`: Overview, Waiting on you, Sessions, Rules, Plan & review, Project and Settings (`docs/DECISIONS.md` → D-7, D-9).                                          |
 | `extension/` | Sidebar webview, message handling and key storage for an editor extension. It is not yet a loadable extension: there is no `activate` entry point and no build step (`ISSUE.md` → I-6).                                            |
 
 ### Where the data comes from
@@ -43,11 +43,51 @@ If the project has no audit log yet, the dashboard says so and shows the path it
 | Variable                                 | Default         | Effect                                                                                                                                                    |
 | ---------------------------------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--project <path>` / `AGENTDOCK_PROJECT` | current folder  | The project whose `.ctrlplane/audit.db` is shown. Repeat `--project` to watch several; the sidebar then has a project picker (`docs/DECISIONS.md` → D-8). |
-| `AGENTDOCK_CODEX=1`                      | off             | Plan & review runs Codex CLI to plan and to explain changes (read-only sandbox, one run at a time). Off, planning uses built-in questions.                |
+| `AGENTDOCK_CODEX=1`                      | off             | Plan & review uses Codex when no `supervisor.json` exists (see [Supervisor providers](#supervisor-providers)). Off, planning uses built-in questions.     |
 | `AGENTDOCK_CODEX_PATH`                   | found on `PATH` | The Codex CLI executable to run.                                                                                                                          |
 | `AGENTDOCK_DEV_ORIGIN`                   | off             | Lets the Next.js dev server call the API, for example `http://localhost:3000`. Only a localhost or 127.0.0.1 address is accepted.                         |
 | `AGENTDOCK_HOST`                         | `127.0.0.1`     | The address to listen on: `127.0.0.1`, `::1`, or `0.0.0.0` / `::` inside a container (see below). Anything else stops the backend.                        |
 | `AGENTDOCK_PORT`                         | `45820`         | The port to listen on.                                                                                                                                    |
+
+## Supervisor providers
+
+Plan & review can ask an AI supervisor to plan a feature and to explain the changes an agent made. Pick one in your own terminal with [`ctrlplane supervisor`](https://github.com/ankit-tiwari-dev/agentdock-cli#supervisor-providers); the backend reads the choice on every request, so it applies without a restart.
+
+| Provider            | Setup                                                                                                                      |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `codex`             | `ctrlplane supervisor use codex [model]`. Runs the Codex CLI on this machine with a read-only sandbox. No key.             |
+| `claude`            | `ctrlplane supervisor set-key claude`, then `ctrlplane supervisor use claude claude-opus-5-5`.                             |
+| `openai-compatible` | `ctrlplane supervisor use openai-compatible llama3.2 --base-url http://127.0.0.1:11434/v1`. A key is optional (`set-key`). |
+
+With no `supervisor.json`, `AGENTDOCK_CODEX=1` still turns on Codex; with neither, planning uses built-in questions and explaining says how to turn a supervisor on.
+
+The Settings page shows the provider, the model and whether each key is saved, and can switch provider and model. It cannot set a key or the base URL, and it cannot turn the supervisor on: those happen only in the terminal.
+
+**What is sent where.** Codex reads the repository itself. For `claude` (to `api.anthropic.com`) and `openai-compatible` (to the base URL), the backend sends:
+
+- planning: your request, your answers and up to 2,000 tracked file names;
+- explaining: `git status`, `git diff HEAD` and the names, not the contents, of untracked files.
+
+Secrets are redacted first. Anything over 200 KB is not sent: commit or stash part of the change, or shorten the request. Each run is one model call, never retried after an error (an OpenAI-compatible server that rejects structured output gets one second call without it); one run at a time; a run stops after 3 minutes. The Claude API bills per token, so an explain on a large diff costs more than a plan.
+
+**Keys** stay in the OS keychain. The backend reads one only to make a call and never returns, logs or stores it. Errors reach the page as fixed messages; details go to the backend log with the key removed.
+
+**Docker.** The container cannot read the host keychain, so `claude` and `openai-compatible` refuse to run there, and the Settings page is read-only. Use the CLI on the host.
+
+| Message code                     | What to do                                                                    |
+| -------------------------------- | ----------------------------------------------------------------------------- |
+| `KEY_MISSING`, `KEY_REJECTED`    | Save a key: `ctrlplane supervisor set-key <provider>`.                        |
+| `MODEL_NOT_FOUND`                | Pick another model on the Settings page or with `ctrlplane supervisor use`.   |
+| `CONFIG_INVALID`                 | Rewrite the file: `ctrlplane supervisor use <provider> <model>`.              |
+| `KEYCHAIN_UNAVAILABLE`           | Install the OS keychain tool the message names, or run outside Docker.        |
+| `UNREACHABLE`, `TIMEOUT`         | Check the network, or that the local model server is running at the base URL. |
+| `CONTEXT_TOO_LARGE`              | Commit or stash part of the change, or shorten the request.                   |
+| `RATE_LIMITED`, `PROVIDER_ERROR` | Try again later.                                                              |
+| `REFUSED`, `INVALID_ANSWER`      | Rephrase the request, or pick a stronger model.                               |
+| `GIT_FAILED`                     | Make sure the project folder is a git repository.                             |
+| `BUSY`                           | Wait for the current run to finish.                                           |
+
+Why it works this way: [`docs/DECISIONS.md`](docs/DECISIONS.md) → D-3, D-9, D-10.
 
 ## Run with Docker
 
@@ -75,7 +115,7 @@ Keep these two parts of the command as they are:
 
 To use another port, set it once, so both sides match: `AGENTDOCK_PORT=45900 docker compose up`. With `docker run`, use `-e AGENTDOCK_PORT=45900 -p 127.0.0.1:45900:45900`. A published port that differs from the container's own is refused by the `Host` check.
 
-The image holds Node, the backend and the built dashboard, and runs as a non-root user. Compose also makes its filesystem read-only and drops all Linux capabilities. Codex CLI is not in the image, so Plan & review uses its built-in questions. Why it works this way: [`docs/DECISIONS.md`](docs/DECISIONS.md) → D-4.
+The image holds Node, the backend and the built dashboard, and runs as a non-root user. Compose also makes its filesystem read-only and drops all Linux capabilities. Codex CLI is not in the image, and the API providers need the host keychain, so Plan & review uses its built-in questions. Why it works this way: [`docs/DECISIONS.md`](docs/DECISIONS.md) → D-4.
 
 ## Security model
 
