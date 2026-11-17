@@ -44,6 +44,14 @@ Each entry: the decision, why, and what it rules out.
 
 **Rules out:** opening the dashboard from another machine; a published port that differs from the container's port (the `Host` check expects the server's own port, so `AGENTDOCK_PORT` sets both); Codex CLI inside the image. Linux and macOS hosts were not tested by hand; CI runs the smoke test on Linux.
 
+## D-5 · The code is MIT licensed
+
+**Decision:** the code is released under the MIT License (`LICENSE` at the repo root).
+
+**Why:** it makes the project open source with the fewest conditions for users and contributors: they only have to keep the copyright and license notice.
+
+**Rules out:** limits on reuse. Anyone may reuse the code, including commercially, with no obligation to share their changes.
+
 ## D-6 · "Needs you" shows approval requests from the last 15 minutes
 
 **Decision:** the Overview's "Needs you" card lists tool calls whose verdict was `REQUIRE_MANUAL_APPROVAL` and that happened in the last 15 minutes, newest first, and tells the developer to answer in that agent. The "Asked for approval" card shows the all-time count next to how many fall in that window.
