@@ -8,9 +8,10 @@ import type { AuditReader, DashboardEvent } from "./audit-reader.ts";
 import { contentSecurityPolicy, contentType, decodePath, findExportFile } from "./static-files.ts";
 import { CodexRoleService } from "./codex-role-service.ts";
 import { type CodexRoles, type Project, ProjectRegistry } from "./projects.ts";
-import { resolveSupervisor, supervisorHome, type ResolvedSupervisor } from "./provider-resolver.ts";
+import { hasKey, keyStatusCache, type KeyReadOptions } from "./key-reader.ts";
+import { isInContainer, resolveSupervisor, supervisorHome, type ResolvedSupervisor } from "./provider-resolver.ts";
 import { stdoutLogSink } from "./run-log.ts";
-import { ERROR_MESSAGES, SupervisorError, type RunMode } from "./supervisor-provider.ts";
+import { ERROR_MESSAGES, SupervisorError, type ProviderName, type RunMode } from "./supervisor-provider.ts";
 import { runSupervisor } from "./supervisor-runner.ts";
 import type { SupervisorInterviewRequest, TrajectoryLoopCheckRequest, WSEventMessage } from "./types.ts";
 import type { ReviewResult, SupervisorResult } from "./supervisor-schemas.ts";
@@ -46,6 +47,10 @@ export interface ServerConfig {
   codexCommand?: { file: string; prefixArgs: string[] };
   /** Receives one JSON line per supervisor run. Defaults to stdout. */
   logSink?: (line: string) => void;
+  /** Replaces the OS keychain tool, for tests. */
+  keychain?: Omit<KeyReadOptions, "inContainer">;
+  /** Replaces the Anthropic API address, for tests. */
+  anthropicBaseUrl?: string;
   /** The Next.js export to serve. Defaults to `frontend/out` next to the backend or the working folder. */
   staticRoot?: string;
   /**
@@ -103,6 +108,9 @@ export class AgentDockBackendServer {
   private env: Record<string, string | undefined>;
   private runTimeoutMs: number;
   private logSink: (line: string) => void;
+  private keychain: Omit<KeyReadOptions, "inContainer"> | undefined;
+  private anthropicBaseUrl: string | undefined;
+  private keySaved: (provider: "claude" | "openai-compatible") => Promise<boolean | null>;
   private staticRoots: string[];
   private devOrigin: string | undefined;
   private port: number;
@@ -127,6 +135,11 @@ export class AgentDockBackendServer {
     this.supervisorHome = supervisorHome(this.env, config?.supervisorHome);
     this.runTimeoutMs = config?.runTimeoutMs ?? 180_000;
     this.logSink = config?.logSink ?? stdoutLogSink;
+    this.keychain = config?.keychain;
+    this.anthropicBaseUrl = config?.anthropicBaseUrl;
+    this.keySaved = keyStatusCache((provider) =>
+      hasKey(provider, { ...this.keychain, inContainer: isInContainer(this.env) }),
+    );
     this.devOrigin = parseDevOrigin(config?.devOrigin ?? process.env.AGENTDOCK_DEV_ORIGIN);
     this.staticRoots = config?.staticRoot
       ? [config.staticRoot]
@@ -278,21 +291,17 @@ export class AgentDockBackendServer {
 
     // 2. Health check
     if (req.method === "GET" && pathname === "/api/health") {
-      const resolved = this.resolveSupervisor();
-      this.sendJson(res, 200, {
-        status: "ok",
-        service: "AgentDock Backend Platform",
-        version: "0.1.0",
-        uptimeSeconds: Math.floor(process.uptime()),
-        connectedClients: this.broadcaster.getConnectedClientsCount(),
-        codexEnabled: resolved.state === "on" && resolved.provider === "codex",
-        supervisor: {
-          provider: resolved.state === "on" ? resolved.provider : null,
-          model: resolved.state === "on" ? resolved.model : null,
-          keySaved: null,
-          ready: resolved.state === "on",
-        },
-      });
+      void this.supervisorHealth().then((supervisor) =>
+        this.sendJson(res, 200, {
+          status: "ok",
+          service: "AgentDock Backend Platform",
+          version: "0.1.0",
+          uptimeSeconds: Math.floor(process.uptime()),
+          connectedClients: this.broadcaster.getConnectedClientsCount(),
+          codexEnabled: supervisor.provider === "codex",
+          supervisor,
+        }),
+      );
       return;
     }
 
@@ -463,6 +472,25 @@ export class AgentDockBackendServer {
     res.end(file.body);
   }
 
+  /**
+   * `ready` means a click would start a model call. The key answer is cached for 30 seconds because the dashboard
+   * asks on every streamed event; a run never uses the cache.
+   */
+  private async supervisorHealth(): Promise<{
+    provider: ProviderName | null;
+    model: string | null;
+    keySaved: boolean | null;
+    ready: boolean;
+  }> {
+    const resolved = this.resolveSupervisor();
+    if (resolved.state !== "on") return { provider: null, model: null, keySaved: null, ready: false };
+    const { provider, model } = resolved;
+    if (provider === "codex") return { provider, model, keySaved: null, ready: true };
+    const keySaved = await this.keySaved(provider);
+    const ready = !isInContainer(this.env) && (provider === "openai-compatible" || keySaved === true);
+    return { provider, model, keySaved, ready };
+  }
+
   /** Read on every request, so `ctrlplane supervisor use` applies without a restart. */
   private resolveSupervisor(): ResolvedSupervisor {
     return resolveSupervisor({
@@ -489,7 +517,19 @@ export class AgentDockBackendServer {
       return;
     }
     this.supervisorBusy = true;
-    runSupervisor({ mode, project, resolved, body, deps: { timeoutMs: this.runTimeoutMs, logSink: this.logSink } })
+    runSupervisor({
+      mode,
+      project,
+      resolved,
+      body,
+      deps: {
+        timeoutMs: this.runTimeoutMs,
+        logSink: this.logSink,
+        env: this.env,
+        keychain: this.keychain,
+        anthropicBaseUrl: this.anthropicBaseUrl,
+      },
+    })
       .then(done)
       .catch((error: unknown) => {
         const failure = error instanceof SupervisorError ? error : new SupervisorError("PROVIDER_ERROR");

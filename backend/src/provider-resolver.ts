@@ -5,11 +5,8 @@ import { parseSupervisorFile, type ParseProblem, type ProviderName } from "./sup
 
 export type ResolvedSupervisor =
   | { state: "off" }
-  | { state: "invalid"; problem: ParseProblem | "unsupported" }
+  | { state: "invalid"; problem: ParseProblem }
   | { state: "on"; provider: ProviderName; model: string | null; baseUrl: string | null; source: "config" | "env" };
-
-/** Providers this backend can run. The others resolve to `unsupported` instead of running something else. */
-const SUPPORTED: ReadonlySet<ProviderName> = new Set(["codex"]);
 
 const CODEX_FROM_ENV: ResolvedSupervisor = {
   state: "on",
@@ -49,7 +46,6 @@ export function resolveSupervisor(o: {
     const parsed = parseSupervisorFile(text);
     if (!parsed.ok) return { state: "invalid", problem: parsed.problem };
     const file = parsed.value;
-    if (!SUPPORTED.has(file.provider)) return { state: "invalid", problem: "unsupported" };
     return {
       state: "on",
       provider: file.provider,
