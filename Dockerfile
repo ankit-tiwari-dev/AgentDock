@@ -17,14 +17,15 @@ RUN npm ci --no-audit --no-fund
 COPY frontend frontend
 RUN npm run build
 
-# Stage 2: Node and the files the backend runs. The backend uses only Node's built-in modules, so there is no
-# node_modules folder here.
+# Stage 2: Node and the files the backend runs. There is no node_modules folder here: the backend runs on Node's
+# built-in modules, and API supervisor providers are refused in the container because it has no host keychain.
 FROM node:24-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5
 WORKDIR /app
 ENV NODE_ENV=production \
     AGENTDOCK_PROJECT=/project \
     AGENTDOCK_HOST=0.0.0.0 \
-    AGENTDOCK_PORT=45820
+    AGENTDOCK_PORT=45820 \
+    AGENTDOCK_IN_CONTAINER=1
 COPY --chown=root:root package.json ./
 COPY --chown=root:root backend/package.json backend/
 COPY --chown=root:root backend/src backend/src

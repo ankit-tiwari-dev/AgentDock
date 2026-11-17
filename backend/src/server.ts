@@ -7,8 +7,13 @@ import { calculateTurnCost } from "./token-pricing.ts";
 import type { AuditReader, DashboardEvent } from "./audit-reader.ts";
 import { contentSecurityPolicy, contentType, decodePath, findExportFile } from "./static-files.ts";
 import { CodexRoleService } from "./codex-role-service.ts";
-import { type CodexRoles, ProjectRegistry } from "./projects.ts";
+import { type CodexRoles, type Project, ProjectRegistry } from "./projects.ts";
+import { resolveSupervisor, supervisorHome, type ResolvedSupervisor } from "./provider-resolver.ts";
+import { stdoutLogSink } from "./run-log.ts";
+import { ERROR_MESSAGES, SupervisorError, type RunMode } from "./supervisor-provider.ts";
+import { runSupervisor } from "./supervisor-runner.ts";
 import type { SupervisorInterviewRequest, TrajectoryLoopCheckRequest, WSEventMessage } from "./types.ts";
+import type { ReviewResult, SupervisorResult } from "./supervisor-schemas.ts";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const POLL_INTERVAL_MS = 1000;
@@ -26,8 +31,21 @@ export interface ServerConfig {
   projectPath?: string;
   /** Several projects, in the order the dashboard lists them; overrides `projectPath`. */
   projectPaths?: string[];
-  /** Lets the guide and the explainer run Codex CLI. Off unless AGENTDOCK_CODEX=1, because each run calls a paid model. */
+  /**
+   * Forces Codex on or off, ignoring `supervisor.json` and AGENTDOCK_CODEX, for tests and embedding. Unset, the
+   * supervisor comes from `ctrlplane supervisor use` or AGENTDOCK_CODEX=1, read on every run.
+   */
   codexEnabled?: boolean;
+  /** The folder holding `supervisor.json`. Defaults to CTRLPLANE_HOME or ~/.ctrlplane. */
+  supervisorHome?: string;
+  /** The environment the supervisor settings are read from. Defaults to process.env. */
+  env?: Record<string, string | undefined>;
+  /** How long one supervisor run may take. Defaults to 3 minutes. */
+  runTimeoutMs?: number;
+  /** Replaces the codex program, for tests: `{ file: process.execPath, prefixArgs: [fakeScript] }`. */
+  codexCommand?: { file: string; prefixArgs: string[] };
+  /** Receives one JSON line per supervisor run. Defaults to stdout. */
+  logSink?: (line: string) => void;
   /** The Next.js export to serve. Defaults to `frontend/out` next to the backend or the working folder. */
   staticRoot?: string;
   /**
@@ -73,17 +91,18 @@ export function parseListenAddress(env: Record<string, string | undefined>): Lis
   return { host, port, loopback: LOOPBACK_HOSTS.includes(host) };
 }
 
-const CODEX_OFF =
-  "Explaining changes runs Codex CLI, which is turned off. Restart the backend with AGENTDOCK_CODEX=1 to turn it on.";
-
 export class AgentDockBackendServer {
   private server;
   private broadcaster: WebSocketBroadcaster;
   private supervisor: SupervisorService;
   private projects: ProjectRegistry;
   private pollTimer: ReturnType<typeof setInterval> | undefined;
-  private codexEnabled: boolean;
-  private codexBusy = false;
+  private codexEnabledOverride: boolean | undefined;
+  private supervisorBusy = false;
+  private supervisorHome: string;
+  private env: Record<string, string | undefined>;
+  private runTimeoutMs: number;
+  private logSink: (line: string) => void;
   private staticRoots: string[];
   private devOrigin: string | undefined;
   private port: number;
@@ -98,9 +117,16 @@ export class AgentDockBackendServer {
     const fixedCodex = config?.codexRoles;
     const codexFor =
       config?.codexRolesFor ??
-      (fixedCodex ? () => fixedCodex : (projectPath: string) => new CodexRoleService(projectPath));
+      (fixedCodex
+        ? () => fixedCodex
+        : (projectPath: string) =>
+            new CodexRoleService(projectPath, { command: config?.codexCommand, timeoutMs: config?.runTimeoutMs }));
     this.projects = new ProjectRegistry(paths, codexFor);
-    this.codexEnabled = config?.codexEnabled ?? process.env.AGENTDOCK_CODEX === "1";
+    this.codexEnabledOverride = config?.codexEnabled;
+    this.env = config?.env ?? process.env;
+    this.supervisorHome = supervisorHome(this.env, config?.supervisorHome);
+    this.runTimeoutMs = config?.runTimeoutMs ?? 180_000;
+    this.logSink = config?.logSink ?? stdoutLogSink;
     this.devOrigin = parseDevOrigin(config?.devOrigin ?? process.env.AGENTDOCK_DEV_ORIGIN);
     this.staticRoots = config?.staticRoot
       ? [config.staticRoot]
@@ -252,13 +278,20 @@ export class AgentDockBackendServer {
 
     // 2. Health check
     if (req.method === "GET" && pathname === "/api/health") {
+      const resolved = this.resolveSupervisor();
       this.sendJson(res, 200, {
         status: "ok",
         service: "AgentDock Backend Platform",
         version: "0.1.0",
         uptimeSeconds: Math.floor(process.uptime()),
         connectedClients: this.broadcaster.getConnectedClientsCount(),
-        codexEnabled: this.codexEnabled,
+        codexEnabled: resolved.state === "on" && resolved.provider === "codex",
+        supervisor: {
+          provider: resolved.state === "on" ? resolved.provider : null,
+          model: resolved.state === "on" ? resolved.model : null,
+          keySaved: null,
+          ready: resolved.state === "on",
+        },
       });
       return;
     }
@@ -314,25 +347,24 @@ export class AgentDockBackendServer {
           }
           this.sendJson(res, 200, result);
         };
-        if (!this.codexEnabled) {
+        const resolved = this.resolveSupervisor();
+        if (resolved.state === "off") {
           announce(this.supervisor.conductInterview(body));
           return;
         }
-        this.runCodex(res, () => project!.codex.interview(body.featurePrompt, body.developerAnswers), announce);
+        const mode: RunMode = body.developerAnswers ? "finalize" : "questions";
+        this.runLocked(res, resolved, mode, project!, body, (result) => announce(result as SupervisorResult));
       });
       return;
     }
 
     if (req.method === "POST" && pathname === "/api/reviewer/explain") {
-      if (!this.codexEnabled) {
-        this.sendJson(res, 503, { error: CODEX_OFF });
+      const resolved = this.resolveSupervisor();
+      if (resolved.state === "off") {
+        this.sendJson(res, 503, new SupervisorError("CODEX_OFF").body());
         return;
       }
-      this.runCodex(
-        res,
-        () => project!.codex.review(),
-        (result) => this.sendJson(res, 200, result),
-      );
+      this.runLocked(res, resolved, "review", project!, undefined, (result) => this.sendJson(res, 200, result));
       return;
     }
 
@@ -431,20 +463,40 @@ export class AgentDockBackendServer {
     res.end(file.body);
   }
 
-  /** One Codex run at a time: each one is a model session that costs money and can take minutes. */
-  private runCodex<T>(res: ServerResponse, run: () => Promise<T>, done: (result: T) => void): void {
-    if (this.codexBusy) {
-      this.sendJson(res, 409, { error: "A Codex run is already in progress. Wait for it to finish." });
+  /** Read on every request, so `ctrlplane supervisor use` applies without a restart. */
+  private resolveSupervisor(): ResolvedSupervisor {
+    return resolveSupervisor({
+      home: this.supervisorHome,
+      env: this.env,
+      codexEnabledOverride: this.codexEnabledOverride,
+    });
+  }
+
+  /**
+   * One supervisor run at a time across every provider and project: each one is a model session that costs money and
+   * can take minutes. A failure reaches the browser only as its fixed message and code.
+   */
+  private runLocked(
+    res: ServerResponse,
+    resolved: Exclude<ResolvedSupervisor, { state: "off" }>,
+    mode: RunMode,
+    project: Project,
+    body: SupervisorInterviewRequest | undefined,
+    done: (result: SupervisorResult | ReviewResult) => void,
+  ): void {
+    if (this.supervisorBusy) {
+      this.sendJson(res, 409, { error: ERROR_MESSAGES.BUSY({}), code: "BUSY" });
       return;
     }
-    this.codexBusy = true;
-    run()
+    this.supervisorBusy = true;
+    runSupervisor({ mode, project, resolved, body, deps: { timeoutMs: this.runTimeoutMs, logSink: this.logSink } })
       .then(done)
-      .catch((error: unknown) =>
-        this.sendJson(res, 503, { error: error instanceof Error ? error.message : String(error) }),
-      )
+      .catch((error: unknown) => {
+        const failure = error instanceof SupervisorError ? error : new SupervisorError("PROVIDER_ERROR");
+        this.sendJson(res, 503, failure.body());
+      })
       .finally(() => {
-        this.codexBusy = false;
+        this.supervisorBusy = false;
       });
   }
 
