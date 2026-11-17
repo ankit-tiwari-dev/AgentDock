@@ -1,8 +1,8 @@
 import { basename, resolve } from "node:path";
 import { AuditReader } from "./audit-reader.ts";
-import type { CodexRoleService } from "./codex-role-service.ts";
+import type { SupervisorProvider } from "./supervisor-provider.ts";
 
-export type CodexRoles = Pick<CodexRoleService, "interview" | "review">;
+export type CodexRoles = SupervisorProvider;
 
 export interface ProjectInfo {
   id: string;
