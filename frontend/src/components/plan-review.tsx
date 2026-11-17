@@ -1,6 +1,7 @@
 "use client";
 
 import { type FormEvent, useState } from "react";
+import { type ProjectSummary, projectQuery } from "@/lib/events";
 import { PageHead } from "./page-parts";
 
 type Question = { id: string; question: string; whyItMatters: string; suggestedAnswers: string[] };
@@ -27,16 +28,23 @@ const handoffText = (spec: LockedSpec) => spec.developerPrompt ?? spec.instructi
 type Props = {
   apiOrigin: string;
   codexEnabled: boolean;
+  project: ProjectSummary | null;
+  showProject: boolean;
   onCopy: (text: string, label: string) => void;
   onToast: (message: string) => void;
 };
 
-export default function PlanReview({ apiOrigin, codexEnabled, onCopy, onToast }: Props) {
+export default function PlanReview({ apiOrigin, codexEnabled, project, showProject, onCopy, onToast }: Props) {
   const [prompt, setPrompt] = useState("");
   const [interview, setInterview] = useState<Interview | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [review, setReview] = useState<Review | null>(null);
   const [busy, setBusy] = useState<"plan" | "handoff" | "review" | null>(null);
+  // Each answer stays tied to the project picked when it was asked for, even after switching projects.
+  const [planFor, setPlanFor] = useState<ProjectSummary | null>(null);
+  const [reviewFor, setReviewFor] = useState<ProjectSummary | null>(null);
+  const forLine = (target: ProjectSummary | null) =>
+    showProject && target ? <p className="pg-note">For {target.name}</p> : null;
 
   async function postJson<T>(path: string, body: unknown): Promise<T> {
     const response = await fetch(`${apiOrigin}${path}`, {
@@ -53,8 +61,11 @@ export default function PlanReview({ apiOrigin, codexEnabled, onCopy, onToast }:
     if (!prompt.trim()) return;
     setBusy("plan");
     setInterview(null);
+    setPlanFor(project);
     try {
-      const result = await postJson<Interview>("/api/supervisor/interview", { featurePrompt: prompt });
+      const result = await postJson<Interview>(`/api/supervisor/interview${projectQuery(project?.id)}`, {
+        featurePrompt: prompt,
+      });
       setInterview(result);
       const questions = result.clarificationQuestions || [];
       setAnswers(Object.fromEntries(questions.map((question) => [question.id, question.suggestedAnswers[0]])));
@@ -71,7 +82,10 @@ export default function PlanReview({ apiOrigin, codexEnabled, onCopy, onToast }:
     setBusy("handoff");
     try {
       setInterview(
-        await postJson<Interview>("/api/supervisor/interview", { featurePrompt: prompt, developerAnswers: answers }),
+        await postJson<Interview>(`/api/supervisor/interview${projectQuery(planFor?.id)}`, {
+          featurePrompt: prompt,
+          developerAnswers: answers,
+        }),
       );
     } catch (error) {
       onToast(error instanceof Error ? error.message : "The handoff could not be written.");
@@ -83,8 +97,9 @@ export default function PlanReview({ apiOrigin, codexEnabled, onCopy, onToast }:
   async function explain() {
     setBusy("review");
     setReview(null);
+    setReviewFor(project);
     try {
-      setReview(await postJson<Review>("/api/reviewer/explain", {}));
+      setReview(await postJson<Review>(`/api/reviewer/explain${projectQuery(project?.id)}`, {}));
     } catch (error) {
       onToast(error instanceof Error ? error.message : "The reviewer did not answer.");
     } finally {
@@ -141,6 +156,7 @@ export default function PlanReview({ apiOrigin, codexEnabled, onCopy, onToast }:
             </form>
             {questions && !spec && (
               <div className="pg-questions">
+                {forLine(planFor)}
                 {questions.length === 0 && (
                   <p className="pg-note">The supervisor has no questions for this one. Write the handoff.</p>
                 )}
@@ -174,6 +190,7 @@ export default function PlanReview({ apiOrigin, codexEnabled, onCopy, onToast }:
             {spec && (
               <div className="pg-handoff">
                 <h3>Handoff ready</h3>
+                {forLine(planFor)}
                 <p className="pg-handoff-title">{spec.title}</p>
                 <ul>
                   {spec.acceptanceCriteria.map((criterion) => (
@@ -219,6 +236,7 @@ export default function PlanReview({ apiOrigin, codexEnabled, onCopy, onToast }:
             </button>
             {review && (
               <div className="pg-review">
+                {forLine(reviewFor)}
                 <p>{review.summary}</p>
                 <h3>Files</h3>
                 {review.changes.length ? (

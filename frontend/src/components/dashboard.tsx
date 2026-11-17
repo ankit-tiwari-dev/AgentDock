@@ -1,7 +1,17 @@
 "use client";
 
-import { type ReactNode, useEffect, useState } from "react";
-import { type DashboardSnapshot, type Page, approvalRequests, pageFromHash, projectName } from "../lib/events";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  type DashboardSnapshot,
+  type Page,
+  type ProjectSummary,
+  approvalRequests,
+  isForProject,
+  pageFromHash,
+  projectFromSearch,
+  projectName,
+  projectQuery,
+} from "../lib/events";
 import Overview, { WarnIcon } from "./overview";
 import PlanReview from "./plan-review";
 import Project, { type Health } from "./project";
@@ -87,6 +97,26 @@ export default function Dashboard() {
   const [toast, setToast] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [pickedId, setPickedId] = useState<string | null>(null);
+  const pickedRef = useRef<string | null>(null);
+  const shownRef = useRef<string | null>(null);
+  const refreshRef = useRef<() => Promise<void>>(async () => {});
+  pickedRef.current = pickedId;
+  const shownId = pickedId ?? projects[0]?.id ?? null;
+  shownRef.current = shownId;
+
+  // The picked project lives in ?project=, so reload and Back keep it.
+  useEffect(() => {
+    const sync = () => setPickedId(projectFromSearch(window.location.search));
+    sync();
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, []);
+
+  useEffect(() => {
+    void refreshRef.current();
+  }, [pickedId]);
 
   // The page lives in the address hash, so reload and Back keep the developer where they were.
   useEffect(() => {
@@ -108,15 +138,28 @@ export default function Dashboard() {
     let socket: WebSocket | undefined;
     let retry: ReturnType<typeof setTimeout>;
     let disposed = false;
-    const refresh = async () => {
+    const refresh = async (): Promise<void> => {
+      const picked = pickedRef.current;
       try {
-        const response = await fetch(`${API_ORIGIN}/api/dashboard/state`, { cache: "no-store" });
+        const response = await fetch(`${API_ORIGIN}/api/dashboard/state${projectQuery(picked)}`, { cache: "no-store" });
+        if (response.status === 404 && picked) {
+          // A bookmark to a project this backend no longer watches opens the first one.
+          window.history.replaceState(null, "", window.location.pathname + window.location.hash);
+          pickedRef.current = null;
+          setPickedId(null);
+          return;
+        }
         if (!response.ok) throw new Error("Dashboard API unavailable");
         const state = (await response.json()) as DashboardSnapshot;
         const status = await fetch(`${API_ORIGIN}/api/health`, { cache: "no-store" })
           .then((r) => r.json() as Promise<Health>)
           .catch(() => null);
-        if (!disposed) {
+        const list = await fetch(`${API_ORIGIN}/api/projects`, { cache: "no-store" })
+          .then((r) => (r.ok ? (r.json() as Promise<{ projects: ProjectSummary[] }>) : { projects: [] }))
+          .catch(() => ({ projects: [] }));
+        // An answer for a project the developer has since switched away from is dropped.
+        if (!disposed && pickedRef.current === picked) {
+          setProjects(list.projects);
           setSnapshot(state);
           setHealth(status);
           setBackendReachable(true);
@@ -145,7 +188,10 @@ export default function Dashboard() {
         socket.onmessage = (message) => {
           try {
             const event = JSON.parse(message.data);
-            if (["agent_tool_executing", "agent_tool_completed", "agent_session_updated"].includes(event.type))
+            if (
+              ["agent_tool_executing", "agent_tool_completed", "agent_session_updated"].includes(event.type) &&
+              isForProject(event, shownRef.current)
+            )
               void refresh();
           } catch {
             /* Ignore malformed telemetry frames. */
@@ -164,6 +210,7 @@ export default function Dashboard() {
         if (!disposed) retry = setTimeout(connect, 2000);
       }
     };
+    refreshRef.current = refresh;
     void refresh();
     connect();
     return () => {
@@ -186,7 +233,16 @@ export default function Dashboard() {
       .catch(() => setToast("Clipboard access is unavailable."));
   }
 
+  function pickProject(id: string) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("project", id);
+    window.history.pushState(null, "", url);
+    setSnapshot(EMPTY);
+    setPickedId(id);
+  }
+
   const open = approvalRequests(snapshot.events, now).open;
+  const shownProject = projects.find((project) => project.id === shownId) ?? null;
 
   return (
     <div className="ad-shell">
@@ -197,7 +253,9 @@ export default function Dashboard() {
           </div>
           <div className="ad-brand-text">
             <strong>AgentDock</strong>
-            <small title={snapshot.source?.projectPath}>{projectName(snapshot.source?.projectPath)}</small>
+            <small title={snapshot.source?.projectPath}>
+              {projects.length > 1 ? `${projects.length} projects` : projectName(snapshot.source?.projectPath)}
+            </small>
           </div>
           <button
             type="button"
@@ -224,6 +282,18 @@ export default function Dashboard() {
           </button>
         </div>
         <div className="ad-menu" id="ad-menu">
+          {projects.length > 1 && (
+            <div className="ad-project">
+              <label htmlFor="ad-project">Project</label>
+              <select id="ad-project" value={shownId ?? ""} onChange={(event) => pickProject(event.target.value)}>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.available ? project.name : `${project.name} (no audit log)`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           {NAV_GROUPS.map((group) => (
             <div className="ad-group" key={group}>
               <span className="ad-group-h">{group}</span>
@@ -295,6 +365,8 @@ export default function Dashboard() {
             <PlanReview
               apiOrigin={API_ORIGIN}
               codexEnabled={health?.codexEnabled === true}
+              project={shownProject}
+              showProject={projects.length > 1}
               onCopy={copy}
               onToast={setToast}
             />

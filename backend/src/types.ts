@@ -21,6 +21,8 @@ export interface WSEventMessage {
   sessionId: string;
   timestamp: number;
   data: Record<string, unknown>;
+  /** The id of the project whose audit log the event came from (`GET /api/projects`). */
+  project?: string;
 }
 
 export interface ClarificationQuestion {

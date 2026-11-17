@@ -207,6 +207,22 @@ export function projectName(path: string | undefined): string {
   return path?.split(/[\\/]/).filter(Boolean).pop() || "No project";
 }
 
+/** A project the backend watches, as `GET /api/projects` lists it. */
+export type ProjectSummary = { id: string; name: string; projectPath: string; available: boolean };
+
+export function projectFromSearch(search: string): string | null {
+  return new URLSearchParams(search).get("project");
+}
+
+export function projectQuery(id: string | null | undefined): string {
+  return id ? `?project=${encodeURIComponent(id)}` : "";
+}
+
+/** A message with no project comes from a backend that watches one project, so it is always for the page on screen. */
+export function isForProject(message: { project?: string }, shownId: string | null): boolean {
+  return !message.project || !shownId || message.project === shownId;
+}
+
 export const PAGES = ["overview", "waiting", "sessions", "rules", "plan", "project"] as const;
 export type Page = (typeof PAGES)[number];
 

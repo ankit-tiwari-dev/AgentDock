@@ -75,3 +75,15 @@ Each entry: the decision, why, and what it rules out.
 - The Rules page lists the rules that acted, from the events the backend sends; the full rule list lives in agentdock-cli, which the dashboard cannot read.
 
 **Rules out:** "Approved" or "Denied" labels, and a page of every rule with on/off switches, until the CLI records the answer and can export its rules.
+
+## D-8 · Several projects come from repeated `--project` flags, and requests name them by id
+
+**Decision:** the backend watches every folder passed with `--project`, in order, one audit reader each. `GET /api/projects` lists them with an id made from the folder name. `GET /api/dashboard/state`, `POST /api/supervisor/interview` and `POST /api/reviewer/explain` take `?project=<id>`; without it they use the first project, and an unknown id is a 404. Every streamed audit event carries `project`. The dashboard shows a picker when there are two or more projects and keeps the pick in `?project=`.
+
+**Why:**
+
+- Flags need no config file and no write endpoint, so there is nothing new to store or secure.
+- A request names a project only by an id the backend gave out, so a web page can never make the backend read a folder it was not started with.
+- Defaulting to the first project keeps one-project setups, the Docker image and older pages working unchanged.
+
+**Rules out:** adding projects from the dashboard, remembering them across restarts, scanning folders, and an all-projects view.
