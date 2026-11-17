@@ -63,6 +63,13 @@ test("project ids come from folder names, one per folder, numbered when names re
   }
 });
 
+test("regression: an id is made in linear time, so a name full of dashes cannot stall start-up", () => {
+  assert.equal(projectIds(["/work/--a--b--"])[0].id, "a-b");
+  const started = performance.now();
+  assert.equal(projectIds([`/work/a${"-".repeat(50_000)}!`])[0].id, "a");
+  assert.ok(performance.now() - started < 200, "a 50,000-dash name takes under 200 ms");
+});
+
 test("GET /api/projects lists every --project in order, and says which have an audit log", async () => {
   const a = auditProject("agentdock-mp-a-");
   const empty = mkdtempSync(join(tmpdir(), "agentdock-mp-empty-"));

@@ -29,8 +29,9 @@ export function projectIds(paths: string[]): ProjectInfo[] {
     const base =
       name
         .toLowerCase()
-        .replace(/[^a-z0-9-]+/g, "-")
-        .replace(/^-+|-+$/g, "") || "project";
+        .split(/[^a-z0-9]+/)
+        .filter(Boolean)
+        .join("-") || "project";
     let id = base;
     for (let n = 2; used.has(id); n++) id = `${base}-${n}`;
     used.add(id);
