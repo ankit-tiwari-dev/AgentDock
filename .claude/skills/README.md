@@ -6,6 +6,11 @@ Claude Code loads each folder here that holds a `SKILL.md` and uses it when the 
 
 - `agentdock-ci`: every GitHub check, the local command that reproduces it, and the rules CI enforces.
 - `agentdock-docker`: running and testing the container, and the settings that must not change.
+- `feature`: building a feature in small approved steps, tests first, through `make ci` and the docs.
+- `pr-review`: reviewing a GitHub pull request with `gh`; comments are posted only after the developer says yes.
+- `dead-weight`: before merge, removing code the branch left unused and fixing docs that now contradict the code.
+- `merge-readiness`: a report-only check of whether a PR can merge, including stacked PRs and D- and I-number clashes.
+- `dashboard-ui`: the dashboard's own colours, type, classes and page patterns, for any visible change.
 
 ## Copied from other projects
 
