@@ -94,9 +94,9 @@ test("regression: a text/plain POST is rejected, so a plain HTML form cannot rea
   await withServer(async (port) => {
     const res = await send(port, {
       method: "POST",
-      path: "/api/coach/analyze",
+      path: "/api/supervisor/interview",
       headers: { "Content-Type": "text/plain" },
-      chunks: json({ prompt: "fix the login bug in src/auth.ts" }),
+      chunks: json({ featurePrompt: "fix the login bug in src/auth.ts" }),
     });
     assert.equal(res.status, 415);
   });
@@ -119,9 +119,9 @@ test("same-origin and no-origin POSTs are accepted", async () => {
     for (const headers of variants) {
       const res = await send(port, {
         method: "POST",
-        path: "/api/coach/analyze",
+        path: "/api/supervisor/interview",
         headers,
-        chunks: json({ prompt: "fix it" }),
+        chunks: json({ featurePrompt: "fix it" }),
       });
       assert.equal(res.status, 200, JSON.stringify(headers));
     }
@@ -144,10 +144,10 @@ test("regression: a WebSocket path with a query string is accepted", async () =>
 
 test("regression: a body over 1 MB is rejected with 413", async () => {
   await withServer(async (port) => {
-    const big = Buffer.from(JSON.stringify({ prompt: "a".repeat(1024 * 1024 + 10) }));
+    const big = Buffer.from(JSON.stringify({ featurePrompt: "a".repeat(1024 * 1024 + 10) }));
     const res = await send(port, {
       method: "POST",
-      path: "/api/coach/analyze",
+      path: "/api/supervisor/interview",
       headers: { "Content-Type": "application/json", "Content-Length": String(big.length) },
       chunks: [big],
     });
@@ -157,16 +157,19 @@ test("regression: a body over 1 MB is rejected with 413", async () => {
 
 test("regression: a character split across two chunks arrives intact", async () => {
   await withServer(async (port) => {
-    const payload = Buffer.from(JSON.stringify({ prompt: "fix the café menu in src/menu.ts" }));
+    // With answers the built-in supervisor returns the prompt as the handoff title, so the text can be checked.
+    const payload = Buffer.from(
+      JSON.stringify({ featurePrompt: "fix the café menu in src/menu.ts", developerAnswers: { scope: "menu only" } }),
+    );
     const split = payload.indexOf(0xc3) + 1; // between the two bytes of "é"
     const res = await send(port, {
       method: "POST",
-      path: "/api/coach/analyze",
+      path: "/api/supervisor/interview",
       headers: { "Content-Type": "application/json" },
       chunks: [payload.subarray(0, split), payload.subarray(split)],
     });
     assert.equal(res.status, 200);
-    assert.equal(JSON.parse(res.body).prompt, "fix the café menu in src/menu.ts");
+    assert.equal(JSON.parse(res.body).lockedSpecification.title, "fix the café menu in src/menu.ts");
   });
 });
 
@@ -174,7 +177,7 @@ test("regression: invalid JSON gets a 400 that says so", async () => {
   await withServer(async (port) => {
     const res = await send(port, {
       method: "POST",
-      path: "/api/coach/analyze",
+      path: "/api/supervisor/interview",
       headers: { "Content-Type": "application/json" },
       chunks: [Buffer.from("{not json")],
     });

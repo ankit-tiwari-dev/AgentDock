@@ -27,26 +27,26 @@ async function withServer(devOrigin: string | undefined, fn: (port: number) => P
   }
 }
 
-const coach = JSON.stringify({ prompt: "Add a login page" });
+const interview = JSON.stringify({ featurePrompt: "Add a login page" });
 
 test("without a dev origin, the Next.js dev port is just another website", async () => {
   await withServer(undefined, async (port) => {
-    const post = await call(port, "POST", "/api/coach/analyze", "http://localhost:3000", coach);
+    const post = await call(port, "POST", "/api/supervisor/interview", "http://localhost:3000", interview);
     assert.equal(post.status, 403);
     assert.equal(post.allow, undefined);
-    assert.equal((await call(port, "OPTIONS", "/api/coach/analyze", "http://localhost:3000")).status, 403);
+    assert.equal((await call(port, "OPTIONS", "/api/supervisor/interview", "http://localhost:3000")).status, 403);
   });
 });
 
 test("the named dev origin may call the API and read the answer; no other origin may", async () => {
   await withServer("http://localhost:3000", async (port) => {
-    const preflight = await call(port, "OPTIONS", "/api/coach/analyze", "http://localhost:3000");
+    const preflight = await call(port, "OPTIONS", "/api/supervisor/interview", "http://localhost:3000");
     assert.equal(preflight.status, 204);
     assert.equal(preflight.allow, "http://localhost:3000");
-    const post = await call(port, "POST", "/api/coach/analyze", "http://localhost:3000", coach);
+    const post = await call(port, "POST", "/api/supervisor/interview", "http://localhost:3000", interview);
     assert.equal(post.status, 200);
     assert.equal(post.allow, "http://localhost:3000");
-    const other = await call(port, "POST", "/api/coach/analyze", "http://localhost:3001", coach);
+    const other = await call(port, "POST", "/api/supervisor/interview", "http://localhost:3001", interview);
     assert.equal(other.status, 403);
     assert.equal(other.allow, undefined);
   });

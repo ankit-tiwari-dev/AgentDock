@@ -3,7 +3,6 @@ import type { Socket } from "node:net";
 import { join, resolve } from "node:path";
 import { WebSocketBroadcaster } from "./websocket-server.ts";
 import { SupervisorService } from "./supervisor-service.ts";
-import { evaluatePromptQuality } from "./prompt-coach.ts";
 import { calculateTurnCost } from "./token-pricing.ts";
 import { AuditReader, type DashboardEvent } from "./audit-reader.ts";
 import { contentSecurityPolicy, contentType, decodePath, findExportFile } from "./static-files.ts";
@@ -70,7 +69,7 @@ export function parseListenAddress(env: Record<string, string | undefined>): Lis
 }
 
 const CODEX_OFF =
-  "The code explainer runs Codex CLI, which is turned off. Restart the backend with AGENTDOCK_CODEX=1 to turn it on.";
+  "Explaining changes runs Codex CLI, which is turned off. Restart the backend with AGENTDOCK_CODEX=1 to turn it on.";
 
 export class AgentDockBackendServer {
   private server;
@@ -337,19 +336,6 @@ export class AgentDockBackendServer {
 
         this.broadcaster.broadcast(event);
         this.sendJson(res, 200, { success: true, broadcastedTo: this.broadcaster.getConnectedClientsCount() });
-      });
-      return;
-    }
-
-    // 6. Prompt Coach Endpoint
-    if (req.method === "POST" && pathname === "/api/coach/analyze") {
-      this.readJsonBody<{ prompt?: string }>(req, res, (body) => {
-        const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
-        if (!prompt) {
-          this.sendJson(res, 400, { error: "Missing required 'prompt'" });
-          return;
-        }
-        this.sendJson(res, 200, evaluatePromptQuality(prompt));
       });
       return;
     }
