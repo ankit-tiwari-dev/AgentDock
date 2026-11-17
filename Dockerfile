@@ -17,8 +17,9 @@ RUN npm ci --no-audit --no-fund
 COPY frontend frontend
 RUN npm run build
 
-# Stage 2: Node and the files the backend runs. There is no node_modules folder here: the backend runs on Node's
-# built-in modules, and API supervisor providers are refused in the container because it has no host keychain.
+# Stage 2: Node and the files the backend runs. There is no node_modules folder here: the backend's one dependency,
+# the Anthropic SDK, is loaded only when the Claude supervisor runs, and API supervisors are refused in the container
+# because it has no host keychain.
 FROM node:24-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5
 WORKDIR /app
 ENV NODE_ENV=production \

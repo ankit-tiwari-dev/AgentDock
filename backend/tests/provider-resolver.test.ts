@@ -74,10 +74,29 @@ test("an unknown file version makes the settings invalid, never a silent fall ba
   });
 });
 
-test("a provider this backend cannot run yet is reported, not run", () => {
+test("claude and openai-compatible resolve with their model and base URL", () => {
   withHome((home, write) => {
     write({ version: 1, provider: "claude", model: "claude-opus-5-5" });
-    assert.deepEqual(resolveSupervisor({ home, env: {} }), { state: "invalid", problem: "unsupported" });
+    assert.deepEqual(resolveSupervisor({ home, env: { AGENTDOCK_CODEX: "1" } }), {
+      state: "on",
+      provider: "claude",
+      model: "claude-opus-5-5",
+      baseUrl: null,
+      source: "config",
+    });
+    write({
+      version: 1,
+      provider: "openai-compatible",
+      model: "qwen3-coder",
+      openaiCompatible: { baseUrl: "http://127.0.0.1:11434/v1" },
+    });
+    assert.deepEqual(resolveSupervisor({ home, env: {} }), {
+      state: "on",
+      provider: "openai-compatible",
+      model: "qwen3-coder",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      source: "config",
+    });
   });
   assert.equal(isInContainer({ AGENTDOCK_IN_CONTAINER: "1" }), true);
   assert.equal(isInContainer({}), false);

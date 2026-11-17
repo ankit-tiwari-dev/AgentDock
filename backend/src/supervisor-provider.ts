@@ -49,6 +49,8 @@ export interface MessageVars {
   status?: number;
   exitCode?: number | null;
   kb?: number;
+  /** The size is a lower bound: git printed more than the backend reads. */
+  atLeast?: boolean;
   mode?: RunMode;
   inContainer?: boolean;
   hint?: string;
@@ -86,10 +88,12 @@ export const ERROR_MESSAGES: Record<SupervisorCode, (v: MessageVars) => string> 
   TIMEOUT: () => UNREACHABLE,
   REFUSED: () => "The model declined this request.",
   INVALID_ANSWER: () => "The model did not return a valid answer. Try again, or pick a stronger model.",
-  CONTEXT_TOO_LARGE: (v) =>
-    v.mode === "review"
-      ? `The changes are ${v.kb ?? 0} KB; the limit is 200 KB. Commit or stash part of them and try again.`
-      : `The request and file list are ${v.kb ?? 0} KB; the limit is 200 KB. Shorten the description and try again.`,
+  CONTEXT_TOO_LARGE: (v) => {
+    const size = `${v.atLeast ? "more than " : ""}${(v.kb ?? 0).toLocaleString("en-US")} KB`;
+    return v.mode === "review"
+      ? `The changes are ${size}; the limit is 200 KB. Commit or stash part of them and try again.`
+      : `The request and file list are ${size}; the limit is 200 KB. Shorten the description and try again.`;
+  },
   GIT_FAILED: () => "Could not read the project's git state. Is the project folder a git repository?",
   PROVIDER_ERROR: (v) => `The provider returned an error (HTTP ${v.status ?? 0}). Try again later.`,
   CODEX_FAILED: (v) =>
