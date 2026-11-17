@@ -183,6 +183,8 @@ export async function withApiBackend(
     env?: Record<string, string>;
     timeoutMs?: number;
     big?: boolean;
+    /** A built dashboard to serve, for checks on the served pages. */
+    staticRoot?: string;
   },
   fn: (h: Harness) => Promise<void>,
 ) {
@@ -209,6 +211,7 @@ export async function withApiBackend(
     anthropicBaseUrl: fake.url,
     codexCommand: { file: process.execPath, prefixArgs: [codexScript] },
     runTimeoutMs: o.timeoutMs ?? 20_000,
+    ...(o.staticRoot ? { staticRoot: o.staticRoot } : {}),
     logSink: (line) => logs.push(JSON.parse(line) as Record<string, unknown>),
   });
   const { port } = await server.start();
