@@ -101,6 +101,17 @@ try {
   const health = await get("/api/health");
   check("GET /api/health answers 200", health.status === 200, String(health.status));
 
+  const settings = await get("/api/supervisor/settings");
+  const view = JSON.parse(settings.body) as { writable?: boolean; writableReason?: string; keys?: unknown };
+  check(
+    "in the container, GET /api/supervisor/settings says not writable and no key is readable",
+    settings.status === 200 &&
+      view.writable === false &&
+      (view.writableReason ?? "").startsWith("Read-only container.") &&
+      JSON.stringify(view.keys) === JSON.stringify({ claude: null, "openai-compatible": null }),
+    settings.body.slice(0, 300),
+  );
+
   const page = await get("/");
   check("the dashboard page is served", page.status === 200 && page.body.includes("<html"), String(page.status));
 

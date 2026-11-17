@@ -37,6 +37,8 @@ export type Mode = "ok" | "hang" | "refusal" | "garbage" | { status: number };
 interface Call {
   api: "anthropic" | "openai";
   context: string;
+  model: unknown;
+  path: string;
 }
 
 function answerFor(context: string, kind: "review" | "supervisor") {
@@ -83,16 +85,23 @@ export async function fakeModels() {
     req.on("data", (c: Buffer) => (raw += c.toString()));
     req.on("end", () => {
       const body = JSON.parse(raw || "{}") as Record<string, unknown>;
-      const api = req.url?.startsWith("/v1/messages") ? "anthropic" : "openai";
+      // Only the Anthropic SDK sends anthropic-version; both APIs list models at /v1/models.
+      const api = req.headers["anthropic-version"] ? "anthropic" : "openai";
       const messages = (body.messages ?? []) as Array<{ role: string; content: string }>;
       const context = messages.at(-1)?.content ?? "";
-      calls.push({ api, context });
+      calls.push({ api, context, model: body.model, path: req.url ?? "" });
       // Echo the key this request carried, as a careless server or proxy might.
       const sentKey = String(req.headers.authorization ?? "").replace(/^Bearer /, "");
       if (mode === "hang") return;
       if (typeof mode === "object") {
         res.writeHead(mode.status, { "content-type": "application/json" });
         res.end(JSON.stringify({ error: { type: "authentication_error", message: `bad key ${sentKey}` } }));
+        return;
+      }
+      if (req.method === "GET" && req.url?.startsWith("/v1/models")) {
+        const ids = api === "anthropic" ? ["claude-opus-5-5", "claude-sonnet-5-5"] : ["qwen3-coder", "llama3.2"];
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ object: "list", data: ids.map((id) => ({ id, type: "model" })), has_more: false }));
         return;
       }
       if (api === "anthropic") {

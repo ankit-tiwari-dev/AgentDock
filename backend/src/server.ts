@@ -9,6 +9,7 @@ import { contentSecurityPolicy, contentType, decodePath, findExportFile } from "
 import { CodexRoleService } from "./codex-role-service.ts";
 import { type CodexRoles, type Project, ProjectRegistry } from "./projects.ts";
 import { hasKey, keyStatusCache, type KeyReadOptions } from "./key-reader.ts";
+import { applySettingsChange, listModels, readSettingsView, type SettingsDeps } from "./supervisor-settings.ts";
 import { isInContainer, resolveSupervisor, supervisorHome, type ResolvedSupervisor } from "./provider-resolver.ts";
 import { stdoutLogSink } from "./run-log.ts";
 import { ERROR_MESSAGES, SupervisorError, type ProviderName, type RunMode } from "./supervisor-provider.ts";
@@ -317,6 +318,11 @@ export class AgentDockBackendServer {
       return;
     }
 
+    if (pathname === "/api/supervisor/settings" || pathname === "/api/supervisor/models") {
+      this.handleSettings(req, res, pathname, url);
+      return;
+    }
+
     // Requests name a project only by an id this backend gave out; a path is never resolved.
     const projectRoutes = ["/api/dashboard/state", "/api/supervisor/interview", "/api/reviewer/explain"];
     const project = this.projects.find(url.searchParams.get("project"));
@@ -489,6 +495,36 @@ export class AgentDockBackendServer {
     const keySaved = await this.keySaved(provider);
     const ready = !isInContainer(this.env) && (provider === "openai-compatible" || keySaved === true);
     return { provider, model, keySaved, ready };
+  }
+
+  private settingsDeps(): SettingsDeps {
+    return {
+      home: this.supervisorHome,
+      env: this.env,
+      keychain: this.keychain,
+      anthropicBaseUrl: this.anthropicBaseUrl,
+      timeoutMs: this.runTimeoutMs,
+      codexEnabledOverride: this.codexEnabledOverride,
+    };
+  }
+
+  /** User-scope routes, so no `?project=`. POST already passed the Origin and Content-Type checks above. */
+  private handleSettings(req: IncomingMessage, res: ServerResponse, pathname: string, url: URL): void {
+    const reply = (work: Promise<{ status: number; body: unknown }>) =>
+      void work
+        .then(({ status, body }) => this.sendJson(res, status, body))
+        .catch(() => {
+          if (!res.headersSent) this.sendJson(res, 500, { error: "Internal error" });
+        });
+    if (req.method === "GET" && pathname === "/api/supervisor/settings") {
+      reply(readSettingsView(this.settingsDeps()).then((body) => ({ status: 200, body })));
+    } else if (req.method === "POST" && pathname === "/api/supervisor/settings") {
+      this.readJsonBody<unknown>(req, res, (body) => reply(applySettingsChange(body, this.settingsDeps())));
+    } else if (req.method === "GET" && pathname === "/api/supervisor/models") {
+      reply(listModels(url.searchParams.get("provider"), this.settingsDeps()));
+    } else {
+      this.sendJson(res, 404, { error: "Not Found", path: pathname });
+    }
   }
 
   /** Read on every request, so `ctrlplane supervisor use` applies without a restart. */
