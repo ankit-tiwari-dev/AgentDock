@@ -119,3 +119,80 @@ export function statusTone(status: string): string {
   if (status === "Guidance" || status === "INSTRUCT") return "guidance";
   return "allowed";
 }
+
+export type StreamFilter = "all" | "Blocked" | "Needs approval";
+
+/** The audit log does not record whether an approval was answered, so an older request is treated as no longer waiting. */
+export const APPROVAL_WINDOW_MS = 15 * 60 * 1000;
+
+const TARGET_KEYS = ["command", "file_path", "pattern", "path", "url", "query"];
+
+export function eventTarget(event: DashboardEvent): string {
+  const input = event.toolInput;
+  if (input === undefined || input === null) return "";
+  if (typeof input === "object") {
+    const fields = input as Record<string, unknown>;
+    for (const key of TARGET_KEYS) {
+      const value = fields[key];
+      if (typeof value === "string" && value) return value;
+    }
+  }
+  return summarize(input);
+}
+
+export function streamCounts(events: DashboardEvent[]): { all: number; blocked: number; approval: number } {
+  let blocked = 0;
+  let approval = 0;
+  for (const event of events) {
+    const status = eventStatus(event);
+    if (status === "Blocked") blocked++;
+    else if (status === "Needs approval") approval++;
+  }
+  return { all: events.length, blocked, approval };
+}
+
+export function filterStream(events: DashboardEvent[], filter: StreamFilter, query: string): DashboardEvent[] {
+  const needle = query.trim().toLowerCase();
+  return events.filter((event) => {
+    if (filter !== "all" && eventStatus(event) !== filter) return false;
+    if (!needle) return true;
+    const haystack = [
+      event.toolName || event.hookEventName,
+      eventTarget(event),
+      event.ruleId,
+      event.reason,
+      event.agent,
+      agentLabel(event.agent),
+    ]
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(needle);
+  });
+}
+
+export function recentApprovalRequests(events: DashboardEvent[], now = Date.now()): DashboardEvent[] {
+  return events
+    .filter((event) => eventStatus(event) === "Needs approval" && now - event.timestamp <= APPROVAL_WINDOW_MS)
+    .sort((a, b) => b.timestamp - a.timestamp);
+}
+
+export function unseenEvents(latest: DashboardEvent[], shown: DashboardEvent[]): DashboardEvent[] {
+  const seen = new Set(shown.map((event) => event.id));
+  return latest.filter((event) => !seen.has(event.id));
+}
+
+const AGENT_NAMES: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" };
+
+export function agentLabel(agent: string): string {
+  return AGENT_NAMES[agent] ?? agent;
+}
+
+/** Ids of rows that arrived since the last render. With no earlier rows (the first load) nothing counts as new. */
+export function newlyArrived(previous: Set<string> | null, shown: DashboardEvent[]): string[] {
+  if (!previous || previous.size === 0) return [];
+  return shown.filter((event) => !previous.has(event.id)).map((event) => event.id);
+}
+
+export function projectName(path: string | undefined): string {
+  return path?.split(/[\\/]/).filter(Boolean).pop() || "No project";
+}

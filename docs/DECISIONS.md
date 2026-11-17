@@ -51,3 +51,15 @@ Each entry: the decision, why, and what it rules out.
 **Why:** it makes the project open source with the fewest conditions for users and contributors: they only have to keep the copyright and license notice.
 
 **Rules out:** limits on reuse. Anyone may reuse the code, including commercially, with no obligation to share their changes.
+
+## D-6 · "Needs you" shows approval requests from the last 15 minutes
+
+**Decision:** the Overview's "Needs you" card lists tool calls whose verdict was `REQUIRE_MANUAL_APPROVAL` and that happened in the last 15 minutes, newest first, and tells the developer to answer in that agent. The "Asked for approval" card shows the all-time count next to how many fall in that window.
+
+**Why:**
+
+- The audit log records that an agent asked, not whether the developer answered. Listing every request ever made would show long-answered ones as waiting.
+- An agent waits at its permission prompt while the developer is at the keyboard, so a request older than 15 minutes has almost always been answered or abandoned. The window is `APPROVAL_WINDOW_MS` in `frontend/src/lib/events.ts`.
+- The agent's own prompt is where the answer goes today, so the card points there instead of offering a button that cannot act.
+
+**Rules out:** approving or denying from the dashboard; showing a request as answered. Both need the CLI to record the answer first.
