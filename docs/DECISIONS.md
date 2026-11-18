@@ -113,3 +113,16 @@ A seventh page, Settings, was added later (D-9).
 - A lazy import keeps every other path, and the image, free of a dependency only one provider needs.
 
 **Rules out:** other runtime dependencies for the backend without a new decision, and the Claude supervisor inside the container.
+
+## D-11 · Cost comes only from `audit.db`, and search reads the log on the server
+
+**Decision:** the dashboard shows token use and cost only from the `session_usage` table that the CLI daemon fills; the daemon is the only reader of agent transcripts, and the dashboard never opens a file outside the project's `.ctrlplane` folder. Search (`GET /api/events/search`) and the session timeline (`GET /api/sessions/<id>/timeline`) are read-only routes on the same database; like the others they take `?project=<id>` (D-8), and a session from another project is a 404. Search matches text with `LIKE` over the stored input, output, tool name, reason and rule, newest first, paged by rowid; outputs stored as separate files are not searched. The timeline pages by sequence number and rowid together, because a sequence number can repeat within a session.
+
+**Why:**
+
+- A transcript holds the whole conversation, and in Docker it is not even mounted. Reading only the database keeps the dashboard's access the same as D-1 and D-4: one file, read-only.
+- The browser holds only the newest 500 events, so finding older ones has to happen on the server.
+- `LIKE` needs no new index, no copy of the data and no change in the CLI's schema, and it stays fast enough on 100,000 events (`scripts/bench-live-view.ts` measures it). Full-text search can be added later without changing the routes.
+- The search text is never logged and no error repeats it, because a user may paste a secret into the box.
+
+**Rules out:** cost for agents whose CLI records none (shown as not available, never as $0), reading transcripts or blob files from the dashboard, and write routes for search or the timeline. D-1 is unchanged.

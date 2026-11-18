@@ -1,6 +1,7 @@
 /**
  * Builds the image with compose.yaml, runs it against a throwaway project and checks that the container
- * behaves as docs/DECISIONS.md D-4 says: it shows the project's audit log, picks up new rows, accepts only
+ * behaves as docs/DECISIONS.md D-4 says: it shows the project's audit log and stored cost, searches it and shows a
+ * session timeline from the read-only mount, picks up new rows, accepts only
  * this machine's Host names, publishes its port on 127.0.0.1 only, and can write neither the project nor its
  * own files. Needs Docker with Compose v2. Run: npm run docker:smoke
  */
@@ -25,7 +26,14 @@ const CLI_SCHEMA = `
     sequence_num INTEGER NOT NULL, event_type TEXT NOT NULL, tool_name TEXT, tool_input_json TEXT,
     tool_output_json TEXT, is_blob_stored INTEGER NOT NULL DEFAULT 0, policy_verdict TEXT, policy_reason TEXT,
     execution_duration_ms INTEGER, created_at INTEGER NOT NULL, rule_id TEXT
-  );`;
+  );
+  CREATE TABLE session_usage (
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, model TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, cache_read_tokens INTEGER NOT NULL,
+    cache_creation_tokens INTEGER NOT NULL, cost_usd REAL NOT NULL, unknown_model INTEGER NOT NULL,
+    turns INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (session_id, model)
+  );
+  CREATE INDEX idx_events_created_at ON events(created_at);`;
 
 const PORT = Number(process.env.AGENTDOCK_SMOKE_PORT ?? 45899);
 const PROJECT_NAME = "agentdock-smoke";
@@ -62,6 +70,8 @@ function get(path: string, host = `127.0.0.1:${PORT}`): Promise<{ status: number
 type State = {
   source: { available: boolean };
   events: Array<{ id: string; toolName?: string; ruleId?: string }>;
+  sessions: Array<{ id: string; usage: { costUsd: number } | null; hasTranscript: boolean }>;
+  counts: { usage: { costUsd: number; sessions: number } | null; usageRecorded: boolean };
 };
 
 async function eventIds(): Promise<string[]> {
@@ -77,9 +87,13 @@ mkdirSync(join(dir, ".ctrlplane"), { mode: 0o755 });
 const db = new DatabaseSync(join(dir, ".ctrlplane", "audit.db"));
 db.exec(CLI_SCHEMA);
 const now = Date.now();
+// The transcript path is on the host and is not mounted: the container must show the stored cost without it.
 db.prepare(
-  "INSERT INTO sessions VALUES ('ses_1', 'claude-code', ?, 'main', 'abc', NULL, NULL, 'active', ?, NULL, NULL)",
-).run(dir, now);
+  "INSERT INTO sessions VALUES ('ses_1', 'claude-code', ?, 'main', 'abc', NULL, NULL, 'active', ?, NULL, ?)",
+).run(dir, now, JSON.stringify({ transcriptPath: "/home/dev/.claude/projects/p/ses_1.jsonl" }));
+db.prepare(
+  "INSERT INTO session_usage VALUES ('ses_1', 'claude-sonnet-4-5', 1200, 300, 5000, 100, 0.0123, 0, 4, ?)",
+).run(now);
 let seq = 0;
 const addEvent = (verdict: string, ruleId: string | null) =>
   db
@@ -120,6 +134,31 @@ try {
     "the project's audit log is shown, with the rule that decided a call",
     state.events.length === 2 && state.events.some((e) => e.ruleId === "RULE-SMOKE"),
     `file found: ${state.source.available}, events: ${JSON.stringify(state.events.map((e) => [e.id, e.ruleId ?? null]))}`,
+  );
+
+  check(
+    "the stored cost is shown for the session and the project",
+    state.sessions[0]?.usage?.costUsd === 0.0123 &&
+      state.sessions[0]?.hasTranscript === true &&
+      state.counts.usageRecorded === true &&
+      state.counts.usage?.costUsd === 0.0123 &&
+      state.counts.usage?.sessions === 1,
+    JSON.stringify({ session: state.sessions[0], counts: state.counts }),
+  );
+
+  const search = await get("/api/events/search?q=RULE-SMOKE");
+  const found = JSON.parse(search.body) as { events?: Array<{ id: string }> };
+  check(
+    "search reads the read-only database",
+    search.status === 200 && found.events?.length === 1 && found.events[0].id === "evt_2",
+    `${search.status} ${search.body.slice(0, 200)}`,
+  );
+  const timeline = await get("/api/sessions/ses_1/timeline");
+  const steps = JSON.parse(timeline.body) as { events?: unknown[] };
+  check(
+    "the session timeline reads the read-only database",
+    timeline.status === 200 && steps.events?.length === 2,
+    `${timeline.status} ${timeline.body.slice(0, 200)}`,
   );
 
   addEvent("ALLOW", null);
