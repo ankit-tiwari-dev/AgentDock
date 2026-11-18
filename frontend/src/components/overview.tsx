@@ -19,6 +19,8 @@ import {
   streamCounts,
   unseenEvents,
 } from "@/lib/events";
+import { ESTIMATED_PROJECT, projectCostView } from "@/lib/cost";
+import { EstimatedMark } from "./page-parts";
 
 export const SETUP_COMMAND = "ctrlplane init --agent all";
 const STREAM_ROWS = 50;
@@ -162,6 +164,7 @@ export default function Overview({ snapshot, connected, backendReachable, checke
               : "No agent running"}
           </span>
         </div>
+        <CostCard counts={snapshot.counts} />
       </section>
 
       <div className="ov-columns">
@@ -349,6 +352,28 @@ function StreamRow({ event, fresh, onOpen }: { event: DashboardEvent; fresh: boo
       </span>
       <span className="ov-mono ov-rule">{rule || "-"}</span>
     </button>
+  );
+}
+
+function CostCard({ counts }: { counts: DashboardSnapshot["counts"] }) {
+  const view = projectCostView(counts);
+  return (
+    <div className="ov-card">
+      <span className="ov-k">Cost (Claude Code)</span>
+      {view.kind === "recorded" ? (
+        <>
+          <span className="ov-v">{view.costText}</span>
+          <span className="ov-k">
+            {view.sub} {view.estimated && <EstimatedMark note={ESTIMATED_PROJECT} />}
+          </span>
+        </>
+      ) : (
+        <>
+          <span className="ov-cost-none">{view.text}</span>
+          {view.help && <span className="ov-k">{view.help}</span>}
+        </>
+      )}
+    </div>
   );
 }
 

@@ -1,4 +1,4 @@
--- Copied from agentdock-cli packages/storage/src/db.ts at commit d8f5149: the initSchema tables,
+-- Copied from agentdock-cli packages/storage/src/db.ts at commit 5ef99bb: the initSchema tables,
 -- plus the index the daemon builds at start (ensureEventsCreatedAtIndex). Change it there, then copy it again.
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,

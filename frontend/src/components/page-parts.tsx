@@ -92,6 +92,15 @@ export function CommandLine({
   );
 }
 
+/** The note is in the title for a mouse and in the text for a screen reader; a hover-only tip misses keyboard and touch. */
+export function EstimatedMark({ note }: { note: string }) {
+  return (
+    <span className="pg-est" title={note}>
+      estimated<span className="sr-only">: {note}</span>
+    </span>
+  );
+}
+
 /** On a phone the detail sits under the list, so picking an item must bring the detail into view. */
 export function revealOnPhone(element: HTMLElement | null) {
   if (element && window.matchMedia("(max-width: 860px)").matches) element.scrollIntoView({ block: "start" });

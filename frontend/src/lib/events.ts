@@ -2,6 +2,8 @@
 
 export type DashboardEvent = {
   id: string;
+  /** The audit row's position; search pages and the "New events" note use it. */
+  rowId?: number;
   sessionId: string;
   timestamp: number;
   hookEventName: string;
@@ -26,13 +28,45 @@ export type DashboardSession = {
   lastActivity: number;
   toolCalls: number;
   blockedCalls: number;
+  /** Token use and cost the CLI recorded; null when it recorded none. */
+  usage: UsageTotals | null;
+  /** The CLI knows where this session's transcript is, so it can record cost for it. */
+  hasTranscript: boolean;
+};
+
+export type UsageTotals = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  costUsd: number;
+  models: string[];
+  /** A model was not in the CLI's price list, so the cost is an estimate. */
+  estimated: boolean;
 };
 
 export type DashboardSnapshot = {
   source?: { projectPath: string; databasePath: string; available: boolean };
   events: DashboardEvent[];
   sessions: DashboardSession[];
-  counts: { toolCalls: number; blockedCalls: number; reviewCalls: number; activeSessions: number; totalEvents: number };
+  counts: {
+    toolCalls: number;
+    blockedCalls: number;
+    reviewCalls: number;
+    activeSessions: number;
+    totalEvents: number;
+    /** Every recorded session in the project, not only the ones the snapshot holds. */
+    usage: (UsageTotals & { sessions: number }) | null;
+    /** False when the CLI that wrote the audit log does not record cost. */
+    usageRecorded: boolean;
+  };
+};
+
+/** An event from search or the session timeline. A large output is kept outside the database and not sent. */
+export type PublicEvent = DashboardEvent & {
+  rowId: number;
+  sequenceNum: number;
+  outputStoredSeparately?: { originalSize: number };
 };
 
 export type RuleSummary = {
@@ -226,8 +260,9 @@ export function isForProject(message: { project?: string }, shownId: string | nu
 export const PAGES = ["overview", "waiting", "sessions", "rules", "plan", "project", "settings"] as const;
 export type Page = (typeof PAGES)[number];
 
+/** The Sessions page keeps its search after the page name: `#sessions?q=…`. */
 export function pageFromHash(hash: string): Page {
-  const name = hash.replace(/^#/, "");
+  const name = hash.replace(/^#/, "").split("?")[0];
   return (PAGES as readonly string[]).includes(name) ? (name as Page) : "overview";
 }
 
@@ -275,6 +310,26 @@ export function sessionTimeline(events: DashboardEvent[], sessionId: string): Da
   return events
     .filter((event) => event.sessionId === sessionId && event.toolName)
     .sort((a, b) => b.timestamp - a.timestamp);
+}
+
+const EVENT_CHIPS: Record<string, string> = {
+  SessionStart: "Session started",
+  UserPromptSubmit: "Prompt",
+  Stop: "Stopped",
+  PreCompact: "Compacted",
+  SessionEnd: "Session ended",
+};
+
+/** Tool calls show their verdict; every other hook gets a neutral chip with what happened. */
+export function timelineChip(event: DashboardEvent): { label: string; tone: "status" | "event" } {
+  if (event.hookEventName === "PreToolUse" || event.hookEventName === "PostToolUse")
+    return { label: eventStatus(event), tone: "status" };
+  return { label: EVENT_CHIPS[event.hookEventName] ?? event.hookEventName, tone: "event" };
+}
+
+export function blobNote(event: PublicEvent): string | null {
+  if (!event.outputStoredSeparately) return null;
+  return `Output stored separately (${Math.ceil(event.outputStoredSeparately.originalSize / 1024)} KB)`;
 }
 
 export type StripMark = "allowed" | "guidance" | "approval" | "blocked" | "observed";
