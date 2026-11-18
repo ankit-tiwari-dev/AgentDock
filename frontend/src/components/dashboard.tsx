@@ -23,7 +23,15 @@ import Waiting from "./waiting";
 const EMPTY: DashboardSnapshot = {
   events: [],
   sessions: [],
-  counts: { toolCalls: 0, blockedCalls: 0, reviewCalls: 0, activeSessions: 0, totalEvents: 0 },
+  counts: {
+    toolCalls: 0,
+    blockedCalls: 0,
+    reviewCalls: 0,
+    activeSessions: 0,
+    totalEvents: 0,
+    usage: null,
+    usageRecorded: true,
+  },
 };
 const API_ORIGIN =
   process.env.NEXT_PUBLIC_BACKEND_API_ORIGIN ||
@@ -368,7 +376,7 @@ export default function Dashboard() {
             />
           )}
           {page === "waiting" && <Waiting snapshot={snapshot} now={now} />}
-          {page === "sessions" && <Sessions snapshot={snapshot} now={now} />}
+          {page === "sessions" && <Sessions snapshot={snapshot} now={now} apiOrigin={API_ORIGIN} projectId={shownId} />}
           {page === "rules" && <Rules snapshot={snapshot} onCopy={copy} />}
           {/* Stays mounted so a running plan or Codex explanation keeps its answer across page switches. */}
           <div hidden={page !== "plan"}>

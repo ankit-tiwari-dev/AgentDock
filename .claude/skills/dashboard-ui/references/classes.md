@@ -27,34 +27,38 @@ Grouped as they appear in `frontend/src/app/styles.css`. Grep the stylesheet and
 
 ## Overview only (`ov-*`)
 
-`ov-head`, `ov-live*`, `ov-metrics`, `ov-card*`, `ov-k`, `ov-v*`, `ov-columns`, `ov-panel`, `ov-row`, `ov-pills`, `ov-search`, `ov-empty`, `ov-needs`, `ov-session*`, `ov-drawer*`, `ov-why-*`, `ov-sr`. They belong to that page. On another page use the `pg-*` patterns; if one is truly needed elsewhere, move it to the shared list on purpose.
+`ov-head`, `ov-live*`, `ov-metrics`, `ov-card*`, `ov-k`, `ov-v*`, `ov-columns`, `ov-panel`, `ov-row`, `ov-pills`, `ov-search`, `ov-empty`, `ov-needs`, `ov-session*`, `ov-drawer*`, `ov-why-*`, `ov-sr`, `ov-cost-none`. They belong to that page. On another page use the `pg-*` patterns; if one is truly needed elsewhere, move it to the shared list on purpose.
 
 ## Pages (`pg-*`)
 
-| Class                                                     | What it is                                                                  |
-| --------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `pg-head`                                                 | page title and lede; render it with `PageHead`                              |
-| `pg-note`, `pg-note-in`, `pg-note-box`                    | quiet notes; `PartialNote` uses `pg-note`                                   |
-| `pg-box`                                                  | the card every page section sits in                                         |
-| `pg-empty`                                                | empty message inside a `pg-box`                                             |
-| `pg-good`, `pg-warn`                                      | a one-word state in green or amber                                          |
-| `pg-group`                                                | a titled group of rows (`h2` with a quiet count in a `span`)                |
-| `pg-reqs`, `pg-req`, `pg-req-open`, `pg-req-*`            | approval request rows on Waiting on you                                     |
-| `pg-ran`, `pg-not-ran`                                    | "Ran afterwards" and "No record it ran" words (D-7)                         |
-| `pg-split`                                                | list and detail side by side; one column at 860 px                          |
-| `pg-picks`, `pg-pick`, `pg-pick-top`, `pg-pick-sub`       | the pickable list in a split page; the picked one has `aria-current="true"` |
-| `pg-state`, `pg-state-on`                                 | small status text with a dot in a pick                                      |
-| `pg-detail-head`                                          | title row of the detail card                                                |
-| `pg-tl`, `pg-tl-row`, `pg-tl-what`, `pg-tl-target`        | a timeline of calls                                                         |
-| `pg-strip`, `pg-t`, `pg-t-<verdict>`, `pg-legend`         | the verdict strip; render with `VerdictStrip` and `StripLegend`             |
-| `pg-counts`, `pg-count`                                   | small counts by verdict                                                     |
-| `pg-howto`, `pg-cmd`, `pg-cmd-label`                      | a how-to card and copyable command rows (`CommandLine`)                     |
-| `pg-two`                                                  | two cards side by side; one column at 860 px                                |
-| `pg-facts`                                                | a `dl` of label and value rows; stacks on a phone                           |
-| `pg-steps`, `pg-step`, `pg-num`, `pg-step-*`              | numbered steps, used only by Plan & review                                  |
-| `pg-field`, `pg-textarea`, `pg-form-foot`, `pg-primary`   | form parts; `pg-primary` is the one main action                             |
-| `pg-questions`, `pg-q`, `pg-choice`                       | interview questions and their choices                                       |
-| `pg-handoff`, `pg-review`, `pg-review-cols`, `pg-kv-pair` | Plan & review results                                                       |
+| Class                                                                                                                                          | What it is                                                                                                                                                 |
+| ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pg-head`                                                                                                                                      | page title and lede; render it with `PageHead`                                                                                                             |
+| `pg-note`, `pg-note-in`, `pg-note-box`                                                                                                         | quiet notes; `PartialNote` uses `pg-note`                                                                                                                  |
+| `pg-box`                                                                                                                                       | the card every page section sits in                                                                                                                        |
+| `pg-empty`                                                                                                                                     | empty message inside a `pg-box`                                                                                                                            |
+| `pg-good`, `pg-warn`                                                                                                                           | a one-word state in green or amber                                                                                                                         |
+| `pg-group`                                                                                                                                     | a titled group of rows (`h2` with a quiet count in a `span`)                                                                                               |
+| `pg-reqs`, `pg-req`, `pg-req-open`, `pg-req-*`                                                                                                 | approval request rows on Waiting on you                                                                                                                    |
+| `pg-ran`, `pg-not-ran`                                                                                                                         | "Ran afterwards" and "No record it ran" words (D-7)                                                                                                        |
+| `pg-split`                                                                                                                                     | list and detail side by side; one column at 860 px                                                                                                         |
+| `pg-picks`, `pg-pick`, `pg-pick-top`, `pg-pick-sub`                                                                                            | the pickable list in a split page; the picked one has `aria-current="true"`                                                                                |
+| `pg-state`, `pg-state-on`                                                                                                                      | small status text with a dot in a pick                                                                                                                     |
+| `pg-detail-head`                                                                                                                               | title row of the detail card                                                                                                                               |
+| `pg-tl`, `pg-tl-row`, `pg-tl-what`, `pg-tl-target`                                                                                             | a timeline of calls                                                                                                                                        |
+| `pg-tl-date`, `pg-hit`, `pg-chip-event`, `pg-blob`                                                                                             | timeline extras: the date line on search results, the highlighted start event, the neutral chip for prompts and stops, the "Output stored separately" note |
+| `pg-tl-bar`, `pg-more`                                                                                                                         | the timeline's heading bar (with "Show from the start") and a "Load more" row                                                                              |
+| `pg-search`, `pg-search-form`, `pg-search-q`, `pg-search-row`, `pg-filters`, `pg-filter`, `pg-results`, `pg-results-head`, `pg-live`, `pg-err` | "Search all events" on Sessions; its fields reuse `st-input` and `st-select`                                                                               |
+| `pg-cost`, `pg-cost-none`, `pg-costbox`, `pg-costbox-none`, `pg-help`, `pg-est`                                                                | cost in a session pick and detail; `pg-est` is the "estimated" mark, render it with `EstimatedMark` (also on the Overview cost card)                       |
+| `pg-strip`, `pg-t`, `pg-t-<verdict>`, `pg-legend`                                                                                              | the verdict strip; render with `VerdictStrip` and `StripLegend`                                                                                            |
+| `pg-counts`, `pg-count`                                                                                                                        | small counts by verdict                                                                                                                                    |
+| `pg-howto`, `pg-cmd`, `pg-cmd-label`                                                                                                           | a how-to card and copyable command rows (`CommandLine`)                                                                                                    |
+| `pg-two`                                                                                                                                       | two cards side by side; one column at 860 px                                                                                                               |
+| `pg-facts`                                                                                                                                     | a `dl` of label and value rows; stacks on a phone                                                                                                          |
+| `pg-steps`, `pg-step`, `pg-num`, `pg-step-*`                                                                                                   | numbered steps, used only by Plan & review                                                                                                                 |
+| `pg-field`, `pg-textarea`, `pg-form-foot`, `pg-primary`                                                                                        | form parts; `pg-primary` is the one main action                                                                                                            |
+| `pg-questions`, `pg-q`, `pg-choice`                                                                                                            | interview questions and their choices                                                                                                                      |
+| `pg-handoff`, `pg-review`, `pg-review-cols`, `pg-kv-pair`                                                                                      | Plan & review results                                                                                                                                      |
 
 ## Global
 
