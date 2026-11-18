@@ -74,7 +74,16 @@ test("the snapshot turns audit rows into dashboard sessions, events and counts",
 
     const snap = reader.snapshot(now);
     assert.equal(snap.source.available, true);
-    assert.deepEqual(snap.counts, { toolCalls: 4, blockedCalls: 1, reviewCalls: 1, activeSessions: 1, totalEvents: 5 });
+    // This schema predates the CLI's cost table, so cost reads as not recorded.
+    assert.deepEqual(snap.counts, {
+      toolCalls: 4,
+      blockedCalls: 1,
+      reviewCalls: 1,
+      activeSessions: 1,
+      totalEvents: 5,
+      usage: null,
+      usageRecorded: false,
+    });
 
     // Newest first, hook names translated back, JSON columns parsed.
     assert.equal(snap.events[0].hookEventName, "PreToolUse");

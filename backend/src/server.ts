@@ -4,7 +4,8 @@ import { join, resolve } from "node:path";
 import { WebSocketBroadcaster } from "./websocket-server.ts";
 import { SupervisorService } from "./supervisor-service.ts";
 import { calculateTurnCost } from "./token-pricing.ts";
-import type { AuditReader, DashboardEvent } from "./audit-reader.ts";
+import { AuditReadError, type AuditReader, type DashboardEvent } from "./audit-reader.ts";
+import { parseSearchQuery, parseTimelineQuery } from "./event-query.ts";
 import { contentSecurityPolicy, contentType, decodePath, findExportFile } from "./static-files.ts";
 import { CodexRoleService } from "./codex-role-service.ts";
 import { type CodexRoles, type Project, ProjectRegistry } from "./projects.ts";
@@ -19,6 +20,19 @@ import type { ReviewResult, SupervisorResult } from "./supervisor-schemas.ts";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const POLL_INTERVAL_MS = 1000;
+const TIMELINE_PATH = /^\/api\/sessions\/([^/]+)\/timeline$/;
+
+/** A malformed id gets the same answer as an unknown one. */
+function decodeSessionId(raw: string): string | undefined {
+  let id: string;
+  try {
+    id = decodeURIComponent(raw);
+  } catch {
+    return undefined;
+  }
+  // eslint-disable-next-line no-control-regex
+  return id.length >= 1 && id.length <= 200 && !/[\u0000-\u001f\u007f]/.test(id) ? id : undefined;
+}
 
 /** The dashboard refreshes when it sees one of these types. */
 function streamType(event: DashboardEvent): WSEventMessage["type"] {
@@ -324,15 +338,45 @@ export class AgentDockBackendServer {
     }
 
     // Requests name a project only by an id this backend gave out; a path is never resolved.
-    const projectRoutes = ["/api/dashboard/state", "/api/supervisor/interview", "/api/reviewer/explain"];
+    const projectRoutes = [
+      "/api/dashboard/state",
+      "/api/supervisor/interview",
+      "/api/reviewer/explain",
+      "/api/events/search",
+    ];
+    const timelineMatch = TIMELINE_PATH.exec(pathname);
     const project = this.projects.find(url.searchParams.get("project"));
-    if (projectRoutes.includes(pathname) && !project) {
+    if ((projectRoutes.includes(pathname) || timelineMatch) && !project) {
       this.sendJson(res, 404, { error: "Unknown project" });
       return;
     }
 
     if (req.method === "GET" && pathname === "/api/dashboard/state") {
       this.sendJson(res, 200, project!.reader.snapshot());
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/events/search") {
+      const query = parseSearchQuery(url.searchParams);
+      if (!query.ok) {
+        this.sendJson(res, 400, { error: query.error, code: "QUERY_INVALID" });
+        return;
+      }
+      this.readAudit(res, "search", () => [200, project!.reader.searchEvents(query.value)]);
+      return;
+    }
+
+    if (req.method === "GET" && timelineMatch) {
+      const query = parseTimelineQuery(url.searchParams);
+      if (!query.ok) {
+        this.sendJson(res, 400, { error: query.error, code: "QUERY_INVALID" });
+        return;
+      }
+      const sessionId = decodeSessionId(timelineMatch[1]);
+      this.readAudit(res, "timeline", () => {
+        const page = sessionId === undefined ? null : project!.reader.sessionTimeline(sessionId, query.value);
+        return page ? [200, page] : [404, { error: "Unknown session for this project.", code: "SESSION_NOT_FOUND" }];
+      });
       return;
     }
 
@@ -574,6 +618,21 @@ export class AgentDockBackendServer {
       .finally(() => {
         this.supervisorBusy = false;
       });
+  }
+
+  /**
+   * Answers a live-view read. A database that cannot be read gives 503 and one log line with the route and the
+   * SQLite error code: never SQL text, the error message or the search text.
+   */
+  private readAudit(res: ServerResponse, route: string, read: () => [number, unknown]): void {
+    try {
+      const [status, body] = read();
+      this.sendJson(res, status, body);
+    } catch (err) {
+      const code = err instanceof AuditReadError ? err.code : "unknown";
+      console.error(`AgentDock Backend: ${route} read failed, code=${code}`);
+      this.sendJson(res, 503, { error: "The audit database could not be read. Try again.", code: "DB_UNAVAILABLE" });
+    }
   }
 
   private sendJson(res: ServerResponse, statusCode: number, data: unknown): void {
