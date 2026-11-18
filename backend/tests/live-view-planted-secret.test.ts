@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { randomBytes } from "node:crypto";
+import { randomInt } from "node:crypto";
 import { AgentDockBackendServer } from "../src/server.ts";
 import { redactObject, redactSecrets } from "../src/redactor.ts";
 import { createAuditDb } from "./live-view-fixture.ts";
@@ -8,7 +8,7 @@ import { createAuditDb } from "./live-view-fixture.ts";
 /** A GitHub-style token made fresh for each run, so no key is ever committed. */
 function plantedKey(): string {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  const body = [...randomBytes(36)].map((b) => alphabet[b % alphabet.length]).join("");
+  const body = Array.from({ length: 36 }, () => alphabet[randomInt(alphabet.length)]).join("");
   return ["gh", "p_"].join("") + body;
 }
 
