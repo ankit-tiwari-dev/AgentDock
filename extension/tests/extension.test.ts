@@ -1,47 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { SecretManager } from "../src/secret-manager.ts";
+import { activateExtension } from "../src/extension.ts";
 import { AgentDockSidebarProvider } from "../src/sidebar-provider.ts";
-import type { SecretStorageLike } from "../src/types.ts";
 
-class MockSecretStorage implements SecretStorageLike {
-  private storeMap: Map<string, string> = new Map();
-
-  async get(key: string): Promise<string | undefined> {
-    return this.storeMap.get(key);
-  }
-
-  async store(key: string, value: string): Promise<void> {
-    this.storeMap.set(key, value);
-  }
-
-  async delete(key: string): Promise<void> {
-    this.storeMap.delete(key);
-  }
-}
-
-test("SecretManager securely stores and checks Gemini & Claude keys", async () => {
-  const mockStorage = new MockSecretStorage();
-  const manager = new SecretManager(mockStorage);
-
-  assert.equal(await manager.hasKeyForProvider("gemini"), false);
-
-  await manager.setGeminiKey("sk-gemini-test-secret-key-12345");
-  assert.equal(await manager.hasKeyForProvider("gemini"), true);
-  assert.equal(await manager.getGeminiKey(), "sk-gemini-test-secret-key-12345");
-
-  await manager.setClaudeKey("sk-ant-test-secret-key-67890");
-  assert.equal(await manager.hasKeyForProvider("claude"), true);
-
-  await manager.clearKeys();
-  assert.equal(await manager.hasKeyForProvider("gemini"), false);
-  assert.equal(await manager.hasKeyForProvider("claude"), false);
+test("activateExtension builds the sidebar provider", () => {
+  const { sidebarProvider } = activateExtension({ subscriptions: [] });
+  assert.ok(sidebarProvider instanceof AgentDockSidebarProvider);
+  assert.ok(sidebarProvider.getHtmlForWebview().includes("AgentDock Supervisor"));
 });
 
 test("SidebarProvider generates HTML and dispatches messages", async () => {
-  const mockStorage = new MockSecretStorage();
-  const manager = new SecretManager(mockStorage);
-  const provider = new AgentDockSidebarProvider(manager, 45820);
+  const provider = new AgentDockSidebarProvider(45820);
 
   // 1. Verify Webview HTML output
   const html = provider.getHtmlForWebview();
@@ -56,14 +25,25 @@ test("SidebarProvider generates HTML and dispatches messages", async () => {
   });
 
   assert.equal(dispatchedMsg?.type, "status_update");
-  assert.equal(dispatchedMsg?.hasGemini, false);
   assert.equal(dispatchedMsg?.backendPort, 45820);
+  // The extension cannot know whether the CLI saved a key, so it must not report one.
+  assert.equal("hasClaude" in (dispatchedMsg ?? {}), false);
+  assert.equal("hasGemini" in (dispatchedMsg ?? {}), false);
+});
 
-  // 3. Test message dispatch: save_api_key
-  await provider.handleMessage({ type: "save_api_key", provider: "gemini", key: "sk-gemini-new-key-123" }, (msg) => {
-    dispatchedMsg = msg as Record<string, unknown>;
-  });
+test("regression: the webview offers no API-key box and never claims a key reached the keychain", () => {
+  const html = new AgentDockSidebarProvider().getHtmlForWebview();
+  assert.equal(/type="password"/i.test(html), false);
+  assert.equal(html.includes("save_api_key"), false);
+  assert.equal(/saved to the OS keychain/i.test(html), false);
+  assert.equal(html.includes("SecretStorage"), false);
+  assert.ok(html.includes("ctrlplane supervisor set-key"));
+});
 
-  assert.equal(dispatchedMsg?.type, "key_saved");
-  assert.equal(await manager.getGeminiKey(), "sk-gemini-new-key-123");
+test("regression: a save-key message from the webview is ignored", async () => {
+  const sent: unknown[] = [];
+  const p = new AgentDockSidebarProvider();
+  const message = { type: "save_api_key", provider: "claude", key: "sk-ant-test-0000000000" };
+  await p.handleMessage(message as unknown as Parameters<typeof p.handleMessage>[0], (msg) => sent.push(msg));
+  assert.deepEqual(sent, []);
 });
