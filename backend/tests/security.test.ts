@@ -35,7 +35,7 @@ function send(port: number, options: SendOptions): Promise<SendResult> {
 }
 
 /** Sends a WebSocket upgrade and reports the status line the server answered with, or "closed". */
-function upgrade(port: number, path: string, origin?: string): Promise<string> {
+function upgrade(port: number, path: string, origin?: string, extra: Record<string, string> = {}): Promise<string> {
   return new Promise((resolve) => {
     const headers: Record<string, string> = {
       Connection: "Upgrade",
@@ -45,6 +45,7 @@ function upgrade(port: number, path: string, origin?: string): Promise<string> {
       "Sec-WebSocket-Key": Buffer.from("the sample nonce").toString("base64"),
     };
     if (origin) headers.Origin = origin;
+    Object.assign(headers, extra);
     const req = request({ host: "127.0.0.1", port, path, headers });
     req.on("upgrade", (res, socket) => {
       socket.destroy();
@@ -133,6 +134,16 @@ test("regression: a WebSocket upgrade from another site is refused", async () =>
     assert.notEqual(await upgrade(port, "/ws/events", "https://evil.example"), "101");
     assert.equal(await upgrade(port, "/ws/events", `http://127.0.0.1:${port}`), "101");
     assert.equal(await upgrade(port, "/ws/events"), "101");
+  });
+});
+
+test("regression: a WebSocket upgrade marked cross-site or same-site is refused even without an Origin", async () => {
+  await withServer(async (port) => {
+    for (const site of ["cross-site", "same-site"]) {
+      assert.notEqual(await upgrade(port, "/ws/events", undefined, { "Sec-Fetch-Site": site }), "101", site);
+    }
+    const own = { "Sec-Fetch-Site": "same-origin" };
+    assert.equal(await upgrade(port, "/ws/events", `http://127.0.0.1:${port}`, own), "101");
   });
 });
 
