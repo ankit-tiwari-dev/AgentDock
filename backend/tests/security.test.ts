@@ -82,9 +82,9 @@ test("regression: a cross-site POST is rejected", async () => {
   await withServer(async (port) => {
     const res = await send(port, {
       method: "POST",
-      path: "/api/events/broadcast",
+      path: "/api/supervisor/interview",
       headers: { Origin: "https://evil.example", "Content-Type": "application/json" },
-      chunks: json({ type: "spec_updated", sessionId: "s", timestamp: 1, data: {} }),
+      chunks: json({ featurePrompt: "fix it" }),
     });
     assert.equal(res.status, 403);
   });
@@ -186,15 +186,17 @@ test("regression: invalid JSON gets a 400 that says so", async () => {
   });
 });
 
-test("regression: the cost endpoint prices a current model at its own rate", async () => {
+test("regression: the routes no client called answer 404", async () => {
   await withServer(async (port) => {
-    const res = await send(port, {
-      method: "POST",
-      path: "/api/cost/calculate",
-      headers: { "Content-Type": "application/json" },
-      chunks: json({ modelName: "claude-opus-5-5", inputTokens: 1_000_000, outputTokens: 0 }),
-    });
-    assert.equal(res.status, 200);
-    assert.equal(JSON.parse(res.body).costUsd, 4);
+    for (const path of ["/api/supervisor/loop-check", "/api/events/broadcast", "/api/cost/calculate"]) {
+      const res = await send(port, {
+        method: "POST",
+        path,
+        headers: { "Content-Type": "application/json" },
+        chunks: json({ type: "agent_session_updated", sessionId: "s", timestamp: 1, data: {}, recentTools: [] }),
+      });
+      assert.equal(res.status, 404, path);
+      assert.equal(JSON.parse(res.body).path, path);
+    }
   });
 });

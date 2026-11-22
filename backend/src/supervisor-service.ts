@@ -1,11 +1,5 @@
 import { createHash } from "node:crypto";
-import type {
-  SupervisorInterviewRequest,
-  SupervisorInterviewResponse,
-  ClarificationQuestion,
-  TrajectoryLoopCheckRequest,
-  TrajectoryLoopCheckResponse,
-} from "./types.ts";
+import type { SupervisorInterviewRequest, SupervisorInterviewResponse, ClarificationQuestion } from "./types.ts";
 
 export class SupervisorService {
   /**
@@ -30,58 +24,6 @@ export class SupervisorService {
     return {
       isRefined: true,
       lockedSpecification: spec,
-    };
-  }
-
-  /**
-   * Analyzes agent tool trajectory to detect infinite debugging loops
-   */
-  public checkTrajectoryForLoops(req: TrajectoryLoopCheckRequest): TrajectoryLoopCheckResponse {
-    const tools = req.recentTools;
-    if (tools.length === 0) {
-      return {
-        loopDetected: false,
-        consecutiveFailureCount: 0,
-        recommendation: "CONTINUE",
-        message: "Trajectory is healthy.",
-      };
-    }
-
-    // Count consecutive failing tool runs
-    let failCount = 0;
-    let lastError: string | undefined;
-
-    for (let i = tools.length - 1; i >= 0; i--) {
-      const t = tools[i];
-      if (t.exitCode !== undefined && t.exitCode !== 0) {
-        failCount++;
-        lastError = t.error || "Execution failed";
-      } else {
-        break;
-      }
-    }
-
-    if (failCount >= 3) {
-      return {
-        loopDetected: true,
-        consecutiveFailureCount: failCount,
-        recommendation: "HALT_FOR_DEVELOPER",
-        message: `Agent 2 is stuck in an execution loop (${failCount} consecutive failures). Halt recommended to prevent token waste.`,
-      };
-    } else if (failCount === 2) {
-      return {
-        loopDetected: false,
-        consecutiveFailureCount: failCount,
-        recommendation: "WARN_AGENT",
-        message: `Agent 2 failed twice consecutively on '${lastError}'. Monitoring for loop threshold.`,
-      };
-    }
-
-    return {
-      loopDetected: false,
-      consecutiveFailureCount: failCount,
-      recommendation: "CONTINUE",
-      message: "Trajectory is healthy.",
     };
   }
 

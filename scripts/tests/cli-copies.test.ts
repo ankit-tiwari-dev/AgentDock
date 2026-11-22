@@ -24,7 +24,7 @@ test("foreignImports lists every import that is not a node: built-in", () => {
 });
 
 test("regression: a copy that missed an upstream fix fails, --sync repairs it, and a package import cannot be copied", () => {
-  // token-pricing.ts kept a quadratic regex for weeks after agentdock-cli fixed it (4d20642).
+  // A token-pricing copy kept a quadratic regex for weeks after agentdock-cli fixed it (4d20642).
   const dir = mkdtempSync(join(tmpdir(), "cli-copies-"));
   const cli = join(dir, "agentdock-cli");
   const dock = join(dir, "agentdock");
@@ -44,11 +44,11 @@ test("regression: a copy that missed an upstream fix fails, --sync repairs it, a
     git("commit", "-q", "-m", "base");
     assert.equal(main(["--cli", cli, "--root", dock]), 0);
 
-    write(cli, COPIES[3].source, 'export const v = "fixed upstream";\n');
+    write(cli, COPIES[2].source, 'export const v = "fixed upstream";\n');
     git("commit", "-q", "-am", "fix");
     assert.equal(main(["--cli", cli, "--root", dock]), 1);
     assert.equal(main(["--cli", cli, "--root", dock, "--sync"]), 0);
-    assert.match(readFileSync(join(dock, COPIES[3].copy), "utf8"), /fixed upstream/);
+    assert.match(readFileSync(join(dock, COPIES[2].copy), "utf8"), /fixed upstream/);
     assert.equal(main(["--cli", cli, "--root", dock]), 0);
 
     write(cli, COPIES[0].source, 'import { x } from "../../core/src/index.ts";\nexport const v = x;\n');

@@ -18,7 +18,6 @@ export const COPIES: readonly Copy[] = [
   { copy: "backend/src/redactor.ts", source: "packages/storage/src/redactor.ts" },
   { copy: "backend/src/keychain.ts", source: "packages/cli/src/keychain.ts" },
   { copy: "backend/src/supervisor-config.ts", source: "packages/cli/src/supervisor-config.ts" },
-  { copy: "backend/src/token-pricing.ts", source: "packages/core/src/token-pricing.ts" },
   { copy: "backend/tests/fixtures/secret-vectors.json", source: "packages/storage/tests/fixtures/secret-vectors.json" },
   { copy: "backend/tests/fixtures/supervisor.v1.json", source: "packages/cli/tests/fixtures/supervisor.v1.json" },
 ];

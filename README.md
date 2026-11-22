@@ -9,11 +9,11 @@ The supervisor itself (hooks, policy engine, audit trail, context packs) lives i
 
 ## What is here
 
-| Workspace    | What it is                                                                                                                                                                                                                         |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `backend/`   | A plain `node:http` server on `127.0.0.1:45820`. It reads a project's audit log, serves it as JSON and as a live WebSocket stream (`/ws/events`), runs the Plan & review and token cost endpoints, and serves the built dashboard. |
-| `frontend/`  | The dashboard, a Next.js app exported to static files in `frontend/out`: Overview, Waiting on you, Sessions, Rules, Plan & review, Project and Settings (`docs/DECISIONS.md` → D-7, D-9).                                          |
-| `extension/` | Sidebar webview, message handling and key storage for an editor extension. It is not yet a loadable extension: there is no `activate` entry point and no build step (`ISSUE.md` → I-6).                                            |
+| Workspace    | What it is                                                                                                                                                                                                          |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `backend/`   | A plain `node:http` server on `127.0.0.1:45820`. It reads a project's audit log, serves it as JSON and as a live WebSocket stream (`/ws/events`), runs the Plan & review endpoints, and serves the built dashboard. |
+| `frontend/`  | The dashboard, a Next.js app exported to static files in `frontend/out`: Overview, Waiting on you, Sessions, Rules, Plan & review, Project and Settings (`docs/DECISIONS.md` → D-7, D-9).                           |
+| `extension/` | Sidebar webview, message handling and key storage for an editor extension. It is not yet a loadable extension: there is no `activate` entry point and no build step (`ISSUE.md` → I-6).                             |
 
 ### Where the data comes from
 
