@@ -96,6 +96,8 @@ export function parseDevOrigin(value: string | undefined): string | undefined {
  * Addresses the standalone backend may listen on. Loopback is the default. `0.0.0.0` and `::` exist for a container,
  * where Docker can only forward a port the server listens on for every address; the container's port must then be
  * published to 127.0.0.1 only. A network card's own address is refused, because it would put the dashboard on the network.
+ * Outside the image (`AGENTDOCK_IN_CONTAINER=1`) the wildcards are refused too: the Host check stops browsers, not a
+ * LAN client that sends a spoofed Host.
  */
 const LISTEN_HOSTS = ["127.0.0.1", "::1", "0.0.0.0", "::"];
 const LOOPBACK_HOSTS = ["127.0.0.1", "::1"];
@@ -109,12 +111,24 @@ export function parseListenAddress(env: Record<string, string | undefined>): Lis
   if (!LISTEN_HOSTS.includes(host)) {
     return { error: `AGENTDOCK_HOST must be one of ${LISTEN_HOSTS.join(", ")}; got "${host}".` };
   }
+  if (!LOOPBACK_HOSTS.includes(host) && !isInContainer(env)) {
+    return {
+      error: `AGENTDOCK_HOST=${host} is only for the container image, which publishes the port to 127.0.0.1; use 127.0.0.1 or ::1.`,
+    };
+  }
   const rawPort = env.AGENTDOCK_PORT || String(DEFAULT_PORT);
   const port = /^\d{1,5}$/.test(rawPort) ? Number(rawPort) : NaN;
   if (!(port >= 1 && port <= 65535)) {
     return { error: `AGENTDOCK_PORT must be a whole number from 1 to 65535; got "${rawPort}".` };
   }
   return { host, port, loopback: LOOPBACK_HOSTS.includes(host) };
+}
+
+/** True for 127.0.0.0/8, ::1 and the IPv4-mapped form a dual-stack socket reports for 127.x. */
+export function isLoopbackAddress(address: string | undefined): boolean {
+  if (!address) return false;
+  const v4 = address.startsWith("::ffff:") ? address.slice(7) : address;
+  return address === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(v4);
 }
 
 export class AgentDockBackendServer {
@@ -173,6 +187,14 @@ export class AgentDockBackendServer {
     this.server = createServer((req, res) => {
       this.handleHttpRequest(req, res);
     });
+
+    // Outside a container only this machine may connect, whatever the Host header claims; in one, Docker's 127.0.0.1
+    // publish is the boundary and traffic arrives from the bridge gateway.
+    if (!isInContainer(this.env)) {
+      this.server.on("connection", (socket: Socket) => {
+        if (!isLoopbackAddress(socket.remoteAddress)) socket.destroy();
+      });
+    }
 
     this.server.on("upgrade", (req: IncomingMessage, socket: Socket) => {
       const pathname = new URL(req.url || "/", "http://localhost").pathname;
