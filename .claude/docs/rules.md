@@ -33,7 +33,7 @@ The detail behind the one-line rules in `CLAUDE.md`. Read the section that match
 - Build paths with `node:path`. Compare timestamps as numbers, not as formatted text. CI runs the tests on Linux, Windows and macOS.
 - Name a test that guards a fixed bug `regression: <what must stay true>`. It must fail on the old code and pass on the new. Say in `ISSUE.md` what it got on the old code.
 - Every test must catch a real bug. Do not add a test that only repeats the code, checks a constant, or cannot fail.
-- A test for the audit log builds its own `audit.db` in a temporary folder with the CLI's schema (see `backend/tests/audit-reader.test.ts`). Never point a test at a real project.
+- A test for the audit log builds its own `audit.db` in a temporary folder with `createAuditDb()` or `applyCliSchema()` from `backend/tests/live-view-fixture.ts`; ESLint fails on a hand-written `CREATE TABLE`. Never point a test at a real project.
 - Check the dashboard in a browser only against a throwaway project: a temporary folder with its own `.ctrlplane/audit.db`. Never start the backend with `--project` on a real project for a test, and never write into a real project's audit log.
 
 ## Security rules that code must keep
@@ -46,7 +46,7 @@ Each comes from a fixed bug or a decision. Breaking one is a high-severity findi
 - The audit log is opened read-only (`readOnly: true`). The backend never writes to it (D-1).
 - The dashboard never builds HTML out of data: no `dangerouslySetInnerHTML`, `innerHTML`, `outerHTML` or `insertAdjacentHTML` (I-4). The extension webview keeps its CSP and nonce (I-5).
 - Every HTML response carries the CSP from `backend/src/static-files.ts`. Do not add a host to it. The only outside hosts are the two Google Fonts hosts, and `ISSUE.md` → I-14 tracks removing them.
-- The backend uses only Node's built-in modules. A new npm dependency in `backend/` breaks the Docker image.
+- The backend's only npm dependency is `@anthropic-ai/sdk` (D-10); anything else breaks the Docker image, and `npm run check:arch` fails on it.
 - Docker settings in `compose.yaml` and the `Dockerfile` follow D-4. Use the `agentdock-docker` skill before changing them.
 
 ## Docs and history
