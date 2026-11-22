@@ -54,7 +54,7 @@ The first stage that is wrong holds the bug. If the audit log itself is wrong, t
 
 ## 4. Reproduce on a throwaway project
 
-- Build a temporary folder with its own `.ctrlplane/audit.db`, using the CLI schema from `backend/tests/audit-reader.test.ts`, and the rows that trigger the bug.
+- Build a temporary folder with its own `.ctrlplane/audit.db`, using `createAuditDb()` from `backend/tests/live-view-fixture.ts`, and the rows that trigger the bug.
 - Never write into a real project's audit log, and never start the backend with `--project` on a real project to test a fix.
 - For a page bug, start the backend on the throwaway project and use the `webapp-testing` skill.
 

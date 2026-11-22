@@ -5,6 +5,9 @@ build/
 *.tsbuildinfo
 .next/
 out/
+coverage/
+# CI checks out agentdock-cli here for scripts/cli-copies.ts.
+/agentdock-cli/
 *.log
 .DS_Store
 Thumbs.db

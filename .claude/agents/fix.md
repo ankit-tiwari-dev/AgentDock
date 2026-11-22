@@ -14,7 +14,7 @@ Fix one bug at its root, with proof. Ask before any change outside the files the
 ## 2. Reproduce
 
 - Reproduce with a test or a command, never only by reading code.
-- Use a throwaway project: a temporary folder with its own `.ctrlplane/audit.db` built with the CLI's schema (see `backend/tests/audit-reader.test.ts`). Never start the backend on a real project, and never write into a real project's audit log.
+- Use a throwaway project: a temporary folder with its own `.ctrlplane/audit.db` built with `createAuditDb()` or `applyCliSchema()` from `backend/tests/live-view-fixture.ts` (the CLI's schema, `fixtures/cli-schema.sql`). Never start the backend on a real project, and never write into a real project's audit log.
 - Write down the exact input and the wrong output.
 
 ## 3. Trace the root cause

@@ -12,7 +12,7 @@ import { PageHead, PartialNote } from "./page-parts";
 import { clock } from "./overview";
 
 export default function Waiting({ snapshot, now }: { snapshot: DashboardSnapshot; now: number }) {
-  const { recent, earlier, open } = approvalRequests(snapshot.events, now);
+  const { recent, earlier, open } = approvalRequests(snapshot, now);
   return (
     <>
       <PageHead
@@ -24,7 +24,7 @@ export default function Waiting({ snapshot, now }: { snapshot: DashboardSnapshot
         title="Last 15 minutes"
         note={`${recent.length}, ${open} with no record ${open === 1 ? "it" : "they"} ran`}
         requests={recent}
-        events={snapshot.events}
+        events={snapshot.approvals.events}
         empty="Nothing has needed you in the last 15 minutes. When an agent asks before a risky change, it shows up here."
         markOpen
       />

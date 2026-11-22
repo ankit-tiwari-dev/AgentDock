@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { request } from "node:http";
-import { AgentDockBackendServer, parseListenAddress } from "../src/server.ts";
+import { networkInterfaces } from "node:os";
+import { AgentDockBackendServer, isLoopbackAddress, parseListenAddress } from "../src/server.ts";
 
 test("with no settings the backend listens on 127.0.0.1:45820, as it always has", () => {
   assert.deepEqual(parseListenAddress({}), { host: "127.0.0.1", port: 45820, loopback: true });
@@ -13,17 +14,46 @@ test("with no settings the backend listens on 127.0.0.1:45820, as it always has"
 });
 
 test("a container may listen on every address; only loopback counts as loopback", () => {
-  assert.deepEqual(parseListenAddress({ AGENTDOCK_HOST: "0.0.0.0" }), {
+  const box = { AGENTDOCK_IN_CONTAINER: "1" };
+  assert.deepEqual(parseListenAddress({ ...box, AGENTDOCK_HOST: "0.0.0.0" }), {
     host: "0.0.0.0",
     port: 45820,
     loopback: false,
   });
-  assert.deepEqual(parseListenAddress({ AGENTDOCK_HOST: "::" }), { host: "::", port: 45820, loopback: false });
+  assert.deepEqual(parseListenAddress({ ...box, AGENTDOCK_HOST: "::" }), { host: "::", port: 45820, loopback: false });
   assert.deepEqual(parseListenAddress({ AGENTDOCK_HOST: "::1", AGENTDOCK_PORT: "8080" }), {
     host: "::1",
     port: 8080,
     loopback: true,
   });
+});
+
+test("regression: outside a container 0.0.0.0 and :: are refused, so the API is never served to the LAN", () => {
+  for (const host of ["0.0.0.0", "::"]) {
+    for (const env of [{ AGENTDOCK_HOST: host }, { AGENTDOCK_HOST: host, AGENTDOCK_IN_CONTAINER: "0" }]) {
+      const result = parseListenAddress(env);
+      assert.ok("error" in result, host);
+      assert.match(result.error, /only.*container/i);
+    }
+  }
+});
+
+test("regression: only loopback peers count as this machine", () => {
+  for (const address of ["127.0.0.1", "127.8.9.10", "::1", "::ffff:127.0.0.1"]) {
+    assert.equal(isLoopbackAddress(address), true, address);
+  }
+  for (const address of [
+    "192.168.1.20",
+    "10.0.0.5",
+    "172.17.0.1",
+    "::ffff:192.168.1.20",
+    "fe80::1",
+    "::",
+    "",
+    undefined,
+  ]) {
+    assert.equal(isLoopbackAddress(address), false, String(address));
+  }
 });
 
 test("a network card's address or a host name is refused", () => {
@@ -66,6 +96,53 @@ test("listening on every address does not loosen the Host check", async () => {
     assert.equal(await status(port, `agentdock.example:${port}`), 403);
     // A port published under a different number than the server's own is refused as well.
     assert.equal(await status(port, `127.0.0.1:${port + 1}`), 403);
+  } finally {
+    await server.stop();
+  }
+});
+
+function lanAddress(): string | undefined {
+  for (const list of Object.values(networkInterfaces())) {
+    for (const entry of list ?? []) if (entry.family === "IPv4" && !entry.internal) return entry.address;
+  }
+  return undefined;
+}
+
+function reach(address: string, port: number): Promise<number | "closed"> {
+  return new Promise((resolve) => {
+    const req = request({ host: address, port, path: "/api/health", headers: { host: `127.0.0.1:${port}` } }, (res) => {
+      res.resume();
+      resolve(res.statusCode ?? 0);
+    });
+    req.on("error", () => resolve("closed"));
+    req.end();
+  });
+}
+
+test("regression: outside a container a peer on the network is cut off even with a spoofed Host", async () => {
+  const server = new AgentDockBackendServer({ host: "0.0.0.0", port: 0, codexEnabled: false, env: {} });
+  const { port } = await server.start();
+  try {
+    assert.equal(await reach("127.0.0.1", port), 200);
+    // The machine's own network address is the path a LAN client takes; a box with no network card has none.
+    const lan = lanAddress();
+    if (lan) assert.equal(await reach(lan, port), "closed", lan);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("in a container the bridge gateway still reaches the server, because Docker's 127.0.0.1 publish is the boundary", async () => {
+  const server = new AgentDockBackendServer({
+    host: "0.0.0.0",
+    port: 0,
+    codexEnabled: false,
+    env: { AGENTDOCK_IN_CONTAINER: "1" },
+  });
+  const { port } = await server.start();
+  try {
+    const lan = lanAddress() ?? "127.0.0.1";
+    assert.equal(await reach(lan, port), 200, lan);
   } finally {
     await server.stop();
   }

@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { isInContainer, resolveSupervisor } from "../src/provider-resolver.ts";
+import { isInContainer, resolveSupervisor, supervisorHome } from "../src/provider-resolver.ts";
 
 function withHome(fn: (home: string, write: (value: unknown) => void) => void) {
   const home = mkdtempSync(join(tmpdir(), "agentdock-resolver-"));
@@ -100,4 +100,25 @@ test("claude and openai-compatible resolve with their model and base URL", () =>
   });
   assert.equal(isInContainer({ AGENTDOCK_IN_CONTAINER: "1" }), true);
   assert.equal(isInContainer({}), false);
+});
+
+test("regression: the supervisor home is never relative or inside a served project", () => {
+  withHome((home) => {
+    const project = join(home, "project");
+    const elsewhere = join(home, "user-state");
+    // An empty value means the default; a relative one or one inside a project is refused, never read.
+    assert.equal(supervisorHome({ CTRLPLANE_HOME: "" }, undefined, [project]), join(homedir(), ".ctrlplane"));
+    assert.equal(supervisorHome({ CTRLPLANE_HOME: elsewhere }, undefined, [project]), elsewhere);
+    assert.equal(supervisorHome({ CTRLPLANE_HOME: ".ctrlplane" }, undefined, [project]), null);
+    assert.equal(supervisorHome({ CTRLPLANE_HOME: "state" }, undefined, [project]), null);
+    assert.equal(supervisorHome({ CTRLPLANE_HOME: join(project, ".ctrlplane") }, undefined, [project]), null);
+    assert.equal(supervisorHome({ CTRLPLANE_HOME: project }, undefined, [project]), null);
+    assert.equal(supervisorHome({}, join(project, "x"), [project]), null);
+    assert.equal(supervisorHome({}, "relative", [project]), null);
+    assert.equal(supervisorHome({ CTRLPLANE_HOME: `${project}-other` }, undefined, [project]), `${project}-other`);
+    assert.deepEqual(resolveSupervisor({ home: null, env: { AGENTDOCK_CODEX: "1" } }), {
+      state: "invalid",
+      problem: "home",
+    });
+  });
 });

@@ -5,6 +5,20 @@ import type { ReviewResult, SupervisorResult } from "./supervisor-schemas.ts";
 export type { ProviderName };
 export type RunMode = "questions" | "finalize" | "review";
 
+/** Only a non-blank answer is a decision, so an empty or blank answer map can never lock a plan nobody chose. */
+export function interviewMode(developerAnswers?: Record<string, string>): "questions" | "finalize" {
+  return Object.values(developerAnswers ?? {}).some((answer) => answer.trim() !== "") ? "finalize" : "questions";
+}
+
+export function isAnswerMap(value: unknown): value is Record<string, string> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.values(value).every((answer) => typeof answer === "string")
+  );
+}
+
 export interface RunContext {
   projectPath: string;
   model: string | null;
@@ -72,7 +86,9 @@ export const ERROR_MESSAGES: Record<SupervisorCode, (v: MessageVars) => string> 
   NO_PROVIDER: () => OFF,
   CODEX_OFF: () => OFF,
   CONFIG_INVALID: (v) =>
-    `The supervisor settings file cannot be used (${v.problem ?? "invalid"}). Rewrite it with: ctrlplane supervisor use <provider> <model>`,
+    v.problem === "home"
+      ? "The supervisor settings file cannot be used: CTRLPLANE_HOME is relative or inside a project. Set it to a full path outside your projects."
+      : `The supervisor settings file cannot be used (${v.problem ?? "invalid"}). Rewrite it with: ctrlplane supervisor use <provider> <model>`,
   KEY_MISSING: (v) =>
     `No ${PROVIDER_LABEL[v.provider ?? "claude"]} key saved. Run: ctrlplane supervisor set-key ${v.provider ?? "claude"}`,
   KEYCHAIN_UNAVAILABLE: (v) =>

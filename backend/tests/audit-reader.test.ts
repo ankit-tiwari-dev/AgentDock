@@ -5,28 +5,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { AuditReader } from "../src/audit-reader.ts";
-
-// The two tables the reader uses, as agentdock-cli creates them (packages/storage/src/db.ts).
-// If the CLI changes them, this copy and the reader's queries must change together.
-const CLI_SCHEMA = `
-  PRAGMA journal_mode = WAL;
-  CREATE TABLE sessions (
-    id TEXT PRIMARY KEY, agent_type TEXT NOT NULL, project_path TEXT NOT NULL, git_branch TEXT NOT NULL,
-    base_commit_sha TEXT NOT NULL, head_commit_sha TEXT, spec_id TEXT, status TEXT NOT NULL,
-    started_at INTEGER NOT NULL, ended_at INTEGER, metadata_json TEXT
-  );
-  CREATE TABLE events (
-    id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    sequence_num INTEGER NOT NULL, event_type TEXT NOT NULL, tool_name TEXT, tool_input_json TEXT,
-    tool_output_json TEXT, is_blob_stored INTEGER NOT NULL DEFAULT 0, policy_verdict TEXT, policy_reason TEXT,
-    execution_duration_ms INTEGER, created_at INTEGER NOT NULL
-  );`;
+import { applyCliSchema, createAuditDb } from "./live-view-fixture.ts";
 
 function project() {
   const dir = mkdtempSync(join(tmpdir(), "agentdock-audit-"));
   mkdirSync(join(dir, ".ctrlplane"));
   const writer = new DatabaseSync(join(dir, ".ctrlplane", "audit.db"));
-  writer.exec(CLI_SCHEMA);
+  // An older CLI's log: no rule_id and no session_usage yet (the rule_id test below adds the column).
+  applyCliSchema(writer, { withRuleId: false, withUsage: false, withCreatedAtIndex: false });
   let seq = 0;
   const addEvent = (session: string, type: string, verdict: string | null, reason: string | null, at: number) =>
     writer
@@ -190,5 +176,56 @@ test("the rule that decided a call is shown when the CLI stores it", () => {
   } finally {
     reader.close();
     p.cleanup();
+  }
+});
+
+test("regression: an approval request stays in the snapshot's approvals when 500 newer events push it out of events", () => {
+  const a = createAuditDb();
+  const reader = new AuditReader(a.dir);
+  const now = 1_763_450_000_000;
+  const windowMs = 15 * 60_000;
+  try {
+    a.seedSession("s1");
+    a.seedSession("s2");
+    a.seedEvent("s1", {
+      verdict: "REQUIRE_MANUAL_APPROVAL",
+      toolInput: { command: "old" },
+      createdAt: now - windowMs - 1,
+    });
+    a.seedEvent("s1", {
+      verdict: "REQUIRE_MANUAL_APPROVAL",
+      toolInput: { command: "npm publish" },
+      createdAt: now - 60_000,
+    });
+    a.seedEvent("s1", {
+      eventType: "post_tool",
+      verdict: null,
+      toolInput: { command: "npm publish" },
+      createdAt: now - 59_000,
+    });
+    a.seedEvent("s1", { eventType: "post_tool", verdict: null, toolName: "Read", createdAt: now - 58_000 });
+    a.seedEvent("s2", {
+      eventType: "post_tool",
+      verdict: null,
+      toolInput: { command: "npm publish" },
+      createdAt: now - 57_000,
+    });
+    a.seedEvents("s1", 500, (i) => ({ createdAt: now - 50_000 + i }));
+
+    const snap = reader.snapshot(now);
+    assert.equal(snap.events.length, 500);
+    assert.equal(snap.counts.reviewCalls, 2);
+    assert.equal(snap.approvals.windowMs, windowMs);
+    // The request in the window and the completion "Ran afterwards" compares it with; not the other tool or session.
+    assert.deepEqual(
+      snap.approvals.events.map((e) => [e.hookEventName, e.toolName, e.sessionId, e.decision ?? null]),
+      [
+        ["PostToolUse", "Bash", "s1", null],
+        ["PreToolUse", "Bash", "s1", "REQUIRE_MANUAL_APPROVAL"],
+      ],
+    );
+  } finally {
+    reader.close();
+    a.cleanup();
   }
 });

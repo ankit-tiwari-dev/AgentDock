@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { redactSecrets } from "./redactor.ts";
-import { SupervisorError, type RunMode } from "./supervisor-provider.ts";
+import { SupervisorError, interviewMode, type RunMode } from "./supervisor-provider.ts";
 
 export const CONTEXT_CAP_BYTES = 204_800;
 export const MAX_LISTED_FILES = 2_000;
@@ -63,14 +63,14 @@ export async function buildInterviewContext(
   featurePrompt: string,
   answers?: Record<string, string>,
 ): Promise<BuiltContext> {
-  const mode: RunMode = answers ? "finalize" : "questions";
+  const mode = interviewMode(answers);
   const files = (await git(projectPath, ["ls-files", "-z"], mode)).split("\0").filter(Boolean);
   const listed = files.slice(0, MAX_LISTED_FILES);
   return finish(
     [
-      answers ? FINALIZE_ROLE : QUESTIONS_ROLE,
+      mode === "finalize" ? FINALIZE_ROLE : QUESTIONS_ROLE,
       `FEATURE REQUEST:\n${featurePrompt}`,
-      ...(answers ? [`USER ANSWERS (JSON):\n${JSON.stringify(answers)}`] : []),
+      ...(mode === "finalize" ? [`USER ANSWERS (JSON):\n${JSON.stringify(answers)}`] : []),
       `REPOSITORY FILES (${listed.length} of ${files.length}):\n${listed.join("\n")}`,
     ],
     mode,

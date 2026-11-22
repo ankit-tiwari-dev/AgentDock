@@ -11,29 +11,8 @@ import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-
-// The tables the backend reads, as agentdock-cli creates them (its packages/storage/src/db.ts), in WAL mode
-// like the CLI. backend/tests/audit-reader.test.ts holds the same copy.
-const CLI_SCHEMA = `
-  PRAGMA journal_mode = WAL;
-  CREATE TABLE sessions (
-    id TEXT PRIMARY KEY, agent_type TEXT NOT NULL, project_path TEXT NOT NULL, git_branch TEXT NOT NULL,
-    base_commit_sha TEXT NOT NULL, head_commit_sha TEXT, spec_id TEXT, status TEXT NOT NULL,
-    started_at INTEGER NOT NULL, ended_at INTEGER, metadata_json TEXT
-  );
-  CREATE TABLE events (
-    id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    sequence_num INTEGER NOT NULL, event_type TEXT NOT NULL, tool_name TEXT, tool_input_json TEXT,
-    tool_output_json TEXT, is_blob_stored INTEGER NOT NULL DEFAULT 0, policy_verdict TEXT, policy_reason TEXT,
-    execution_duration_ms INTEGER, created_at INTEGER NOT NULL, rule_id TEXT
-  );
-  CREATE TABLE session_usage (
-    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, model TEXT NOT NULL,
-    input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, cache_read_tokens INTEGER NOT NULL,
-    cache_creation_tokens INTEGER NOT NULL, cost_usd REAL NOT NULL, unknown_model INTEGER NOT NULL,
-    turns INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (session_id, model)
-  );
-  CREATE INDEX idx_events_created_at ON events(created_at);`;
+// Built-in modules only, so the smoke test still needs no npm ci.
+import { applyCliSchema } from "../backend/tests/live-view-fixture.ts";
 
 const PORT = Number(process.env.AGENTDOCK_SMOKE_PORT ?? 45899);
 const PROJECT_NAME = "agentdock-smoke";
@@ -85,7 +64,7 @@ const dir = mkdtempSync(join(tmpdir(), "agentdock-smoke-"));
 chmodSync(dir, 0o755);
 mkdirSync(join(dir, ".ctrlplane"), { mode: 0o755 });
 const db = new DatabaseSync(join(dir, ".ctrlplane", "audit.db"));
-db.exec(CLI_SCHEMA);
+applyCliSchema(db);
 const now = Date.now();
 // The transcript path is on the host and is not mounted: the container must show the stored cost without it.
 db.prepare(

@@ -3,7 +3,6 @@ import type { Socket } from "node:net";
 import { join, resolve } from "node:path";
 import { WebSocketBroadcaster } from "./websocket-server.ts";
 import { SupervisorService } from "./supervisor-service.ts";
-import { calculateTurnCost } from "./token-pricing.ts";
 import { AuditReadError, type AuditReader, type DashboardEvent } from "./audit-reader.ts";
 import { parseSearchQuery, parseTimelineQuery } from "./event-query.ts";
 import { contentSecurityPolicy, contentType, decodePath, findExportFile } from "./static-files.ts";
@@ -13,9 +12,16 @@ import { hasKey, keyStatusCache, type KeyReadOptions } from "./key-reader.ts";
 import { applySettingsChange, listModels, readSettingsView, type SettingsDeps } from "./supervisor-settings.ts";
 import { isInContainer, resolveSupervisor, supervisorHome, type ResolvedSupervisor } from "./provider-resolver.ts";
 import { stdoutLogSink } from "./run-log.ts";
-import { ERROR_MESSAGES, SupervisorError, type ProviderName, type RunMode } from "./supervisor-provider.ts";
+import {
+  ERROR_MESSAGES,
+  SupervisorError,
+  interviewMode,
+  isAnswerMap,
+  type ProviderName,
+  type RunMode,
+} from "./supervisor-provider.ts";
 import { runSupervisor } from "./supervisor-runner.ts";
-import type { SupervisorInterviewRequest, TrajectoryLoopCheckRequest, WSEventMessage } from "./types.ts";
+import type { SupervisorInterviewRequest, WSEventMessage } from "./types.ts";
 import type { ReviewResult, SupervisorResult } from "./supervisor-schemas.ts";
 
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -52,7 +58,7 @@ export interface ServerConfig {
    * supervisor comes from `ctrlplane supervisor use` or AGENTDOCK_CODEX=1, read on every run.
    */
   codexEnabled?: boolean;
-  /** The folder holding `supervisor.json`. Defaults to CTRLPLANE_HOME or ~/.ctrlplane. */
+  /** The folder holding `supervisor.json`. Defaults to CTRLPLANE_HOME or ~/.ctrlplane; refused if relative or in a project. */
   supervisorHome?: string;
   /** The environment the supervisor settings are read from. Defaults to process.env. */
   env?: Record<string, string | undefined>;
@@ -90,6 +96,8 @@ export function parseDevOrigin(value: string | undefined): string | undefined {
  * Addresses the standalone backend may listen on. Loopback is the default. `0.0.0.0` and `::` exist for a container,
  * where Docker can only forward a port the server listens on for every address; the container's port must then be
  * published to 127.0.0.1 only. A network card's own address is refused, because it would put the dashboard on the network.
+ * Outside the image (`AGENTDOCK_IN_CONTAINER=1`) the wildcards are refused too: the Host check stops browsers, not a
+ * LAN client that sends a spoofed Host.
  */
 const LISTEN_HOSTS = ["127.0.0.1", "::1", "0.0.0.0", "::"];
 const LOOPBACK_HOSTS = ["127.0.0.1", "::1"];
@@ -103,12 +111,24 @@ export function parseListenAddress(env: Record<string, string | undefined>): Lis
   if (!LISTEN_HOSTS.includes(host)) {
     return { error: `AGENTDOCK_HOST must be one of ${LISTEN_HOSTS.join(", ")}; got "${host}".` };
   }
+  if (!LOOPBACK_HOSTS.includes(host) && !isInContainer(env)) {
+    return {
+      error: `AGENTDOCK_HOST=${host} is only for the container image, which publishes the port to 127.0.0.1; use 127.0.0.1 or ::1.`,
+    };
+  }
   const rawPort = env.AGENTDOCK_PORT || String(DEFAULT_PORT);
   const port = /^\d{1,5}$/.test(rawPort) ? Number(rawPort) : NaN;
   if (!(port >= 1 && port <= 65535)) {
     return { error: `AGENTDOCK_PORT must be a whole number from 1 to 65535; got "${rawPort}".` };
   }
   return { host, port, loopback: LOOPBACK_HOSTS.includes(host) };
+}
+
+/** True for 127.0.0.0/8, ::1 and the IPv4-mapped form a dual-stack socket reports for 127.x. */
+export function isLoopbackAddress(address: string | undefined): boolean {
+  if (!address) return false;
+  const v4 = address.startsWith("::ffff:") ? address.slice(7) : address;
+  return address === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(v4);
 }
 
 export class AgentDockBackendServer {
@@ -119,7 +139,7 @@ export class AgentDockBackendServer {
   private pollTimer: ReturnType<typeof setInterval> | undefined;
   private codexEnabledOverride: boolean | undefined;
   private supervisorBusy = false;
-  private supervisorHome: string;
+  private supervisorHome: string | null;
   private env: Record<string, string | undefined>;
   private runTimeoutMs: number;
   private logSink: (line: string) => void;
@@ -147,7 +167,7 @@ export class AgentDockBackendServer {
     this.projects = new ProjectRegistry(paths, codexFor);
     this.codexEnabledOverride = config?.codexEnabled;
     this.env = config?.env ?? process.env;
-    this.supervisorHome = supervisorHome(this.env, config?.supervisorHome);
+    this.supervisorHome = supervisorHome(this.env, config?.supervisorHome, paths);
     this.runTimeoutMs = config?.runTimeoutMs ?? 180_000;
     this.logSink = config?.logSink ?? stdoutLogSink;
     this.keychain = config?.keychain;
@@ -168,10 +188,18 @@ export class AgentDockBackendServer {
       this.handleHttpRequest(req, res);
     });
 
+    // Outside a container only this machine may connect, whatever the Host header claims; in one, Docker's 127.0.0.1
+    // publish is the boundary and traffic arrives from the bridge gateway.
+    if (!isInContainer(this.env)) {
+      this.server.on("connection", (socket: Socket) => {
+        if (!isLoopbackAddress(socket.remoteAddress)) socket.destroy();
+      });
+    }
+
     this.server.on("upgrade", (req: IncomingMessage, socket: Socket) => {
       const pathname = new URL(req.url || "/", "http://localhost").pathname;
       const knownPath = pathname === "/ws/events" || pathname === "/ws";
-      if (knownPath && this.isAllowedHost(req.headers.host) && this.isAllowedOrigin(req.headers.origin)) {
+      if (knownPath && this.isAllowedHost(req.headers.host) && this.isAllowedBrowserSource(req)) {
         this.broadcaster.handleUpgrade(req, socket);
       } else {
         socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
@@ -264,6 +292,21 @@ export class AgentDockBackendServer {
     );
   }
 
+  /** A cross-site GET (an image, a no-cors fetch) carries no Origin, so only the browser's Sec-Fetch-Site gives it away. */
+  private isAllowedBrowserSource(req: IncomingMessage): boolean {
+    const origin = req.headers.origin;
+    if (this.devOrigin !== undefined && origin?.toLowerCase() === this.devOrigin) return true;
+    if (!this.isAllowedOrigin(origin)) return false;
+    const site = req.headers["sec-fetch-site"];
+    return site !== "cross-site" && site !== "same-site";
+  }
+
+  /** A link from another site may open a dashboard page, which only reads static files and cannot be read back. */
+  private isPageNavigation(req: IncomingMessage): boolean {
+    const pathname = new URL(req.url || "/", "http://localhost").pathname;
+    return req.method === "GET" && req.headers["sec-fetch-mode"] === "navigate" && !pathname.startsWith("/api/");
+  }
+
   public handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
     // 1. Only this machine and the dashboard's own page may call the API. There are no CORS headers on purpose:
     // without them a browser stops other sites from reading any response.
@@ -277,6 +320,10 @@ export class AgentDockBackendServer {
       res.setHeader("Access-Control-Allow-Origin", this.devOrigin!);
       res.setHeader("Vary", "Origin");
     }
+    if (!this.isAllowedBrowserSource(req) && !this.isPageNavigation(req)) {
+      this.sendJson(res, 403, { error: "Forbidden origin" });
+      return;
+    }
     if (req.method === "OPTIONS") {
       if (!fromDevServer) {
         this.sendJson(res, 403, { error: "Forbidden origin" });
@@ -289,10 +336,6 @@ export class AgentDockBackendServer {
       return;
     }
     if (req.method === "POST") {
-      if (!this.isAllowedOrigin(req.headers.origin)) {
-        this.sendJson(res, 403, { error: "Forbidden origin" });
-        return;
-      }
       // A cross-site page can send text/plain without asking first, but not application/json.
       const contentType = (req.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
       if (contentType !== "application/json") {
@@ -352,7 +395,7 @@ export class AgentDockBackendServer {
     }
 
     if (req.method === "GET" && pathname === "/api/dashboard/state") {
-      this.sendJson(res, 200, project!.reader.snapshot());
+      this.readAudit(res, "state", () => [200, project!.reader.snapshot()], true);
       return;
     }
 
@@ -387,32 +430,18 @@ export class AgentDockBackendServer {
           this.sendJson(res, 400, { error: "Missing required 'featurePrompt'" });
           return;
         }
-
-        const announce = (result: {
-          isRefined: boolean;
-          lockedSpecification?: { title: string; specHash: string; acceptanceCriteria: string[] };
-        }) => {
-          if (result.isRefined && result.lockedSpecification) {
-            this.broadcaster.broadcast({
-              type: "spec_updated",
-              sessionId: "active_session",
-              timestamp: Date.now(),
-              data: {
-                title: result.lockedSpecification.title,
-                specHash: result.lockedSpecification.specHash,
-                criteriaCount: result.lockedSpecification.acceptanceCriteria.length,
-              },
-            });
-          }
-          this.sendJson(res, 200, result);
-        };
-        const resolved = this.resolveSupervisor();
-        if (resolved.state === "off") {
-          announce(this.supervisor.conductInterview(body));
+        if (body.developerAnswers !== undefined && !isAnswerMap(body.developerAnswers)) {
+          this.sendJson(res, 400, { error: "'developerAnswers' must be an object of question id to answer text" });
           return;
         }
-        const mode: RunMode = body.developerAnswers ? "finalize" : "questions";
-        this.runLocked(res, resolved, mode, project!, body, (result) => announce(result as SupervisorResult));
+
+        const resolved = this.resolveSupervisor();
+        if (resolved.state === "off") {
+          this.sendJson(res, 200, this.supervisor.conductInterview(body));
+          return;
+        }
+        const mode: RunMode = interviewMode(body.developerAnswers);
+        this.runLocked(res, resolved, mode, project!, body, (result) => this.sendJson(res, 200, result));
       });
       return;
     }
@@ -424,64 +453,6 @@ export class AgentDockBackendServer {
         return;
       }
       this.runLocked(res, resolved, "review", project!, undefined, (result) => this.sendJson(res, 200, result));
-      return;
-    }
-
-    // 4. Trajectory Loop Check Endpoint
-    if (req.method === "POST" && pathname === "/api/supervisor/loop-check") {
-      this.readJsonBody<TrajectoryLoopCheckRequest>(req, res, (body) => {
-        if (!body || !Array.isArray(body.recentTools)) {
-          this.sendJson(res, 400, { error: "Missing required 'recentTools' array" });
-          return;
-        }
-
-        const loopResult = this.supervisor.checkTrajectoryForLoops(body);
-
-        // If loop detected, broadcast alert
-        if (loopResult.loopDetected) {
-          this.broadcaster.broadcast({
-            type: "circuit_breaker_alert",
-            sessionId: body.sessionId || "unknown",
-            timestamp: Date.now(),
-            data: {
-              consecutiveFailures: loopResult.consecutiveFailureCount,
-              message: loopResult.message,
-            },
-          });
-        }
-
-        this.sendJson(res, 200, loopResult);
-      });
-      return;
-    }
-
-    // 5. Ingest and Broadcast Telemetry Event
-    if (req.method === "POST" && pathname === "/api/events/broadcast") {
-      this.readJsonBody<WSEventMessage>(req, res, (event) => {
-        if (!event || !event.type) {
-          this.sendJson(res, 400, { error: "Invalid event payload" });
-          return;
-        }
-
-        this.broadcaster.broadcast(event);
-        this.sendJson(res, 200, { success: true, broadcastedTo: this.broadcaster.getConnectedClientsCount() });
-      });
-      return;
-    }
-
-    // 7. Token Cost Calculator Endpoint
-    if (req.method === "POST" && pathname === "/api/cost/calculate") {
-      this.readJsonBody<{ modelName?: string; inputTokens?: number; outputTokens?: number }>(req, res, (body) => {
-        this.sendJson(
-          res,
-          200,
-          calculateTurnCost({
-            modelName: body?.modelName,
-            inputTokens: body?.inputTokens,
-            outputTokens: body?.outputTokens,
-          }),
-        );
-      });
       return;
     }
 
@@ -552,7 +523,7 @@ export class AgentDockBackendServer {
     };
   }
 
-  /** User-scope routes, so no `?project=`. POST already passed the Origin and Content-Type checks above. */
+  /** User-scope routes, so no `?project=`. Every request already passed the Origin check, and POST the Content-Type check, above. */
   private handleSettings(req: IncomingMessage, res: ServerResponse, pathname: string, url: URL): void {
     const reply = (work: Promise<{ status: number; body: unknown }>) =>
       void work
@@ -624,13 +595,21 @@ export class AgentDockBackendServer {
    * Answers a live-view read. A database that cannot be read gives 503 and one log line with the route and the
    * SQLite error code: never SQL text, the error message or the search text.
    */
-  private readAudit(res: ServerResponse, route: string, read: () => [number, unknown]): void {
+  private readAudit(res: ServerResponse, route: string, read: () => [number, unknown], reportSchema = false): void {
     try {
       const [status, body] = read();
       this.sendJson(res, status, body);
     } catch (err) {
       const code = err instanceof AuditReadError ? err.code : "unknown";
       console.error(`AgentDock Backend: ${route} read failed, code=${code}`);
+      if (reportSchema && err instanceof AuditReadError && err.schemaMismatch) {
+        this.sendJson(res, 503, {
+          error:
+            "The audit database is missing a table or column this dashboard reads. Update agentdock-cli and AgentDock to matching versions.",
+          code: "SCHEMA_MISMATCH",
+        });
+        return;
+      }
       this.sendJson(res, 503, { error: "The audit database could not be read. Try again.", code: "DB_UNAVAILABLE" });
     }
   }

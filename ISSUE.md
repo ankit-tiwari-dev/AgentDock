@@ -107,3 +107,66 @@ Status flow: FOUND → IN PROGRESS → FIXED. Each entry: symptoms, root cause, 
 - **Symptoms:** a moderate alert for `minimatch` 10.2.6. A crafted glob pattern can make matching take very long.
 - **Root cause:** `eslint`, `@eslint/config-array` and `@typescript-eslint/typescript-estree` require `minimatch ^10`, even in their latest releases; the fix is in 11.0.1. It is a development dependency only: it runs inside the linter, on glob patterns this repo writes, and is not part of what ships.
 - **Fix (waiting):** none yet. It clears when those packages move to minimatch 11, and Dependabot will propose that update. Forcing 11 with an npm `overrides` entry would run the linters on a major version they were not tested with. The alert stays open rather than dismissed, so it is not forgotten.
+
+## I-17 · FIXED · `AGENTDOCK_HOST=0.0.0.0` outside Docker put the API on the network
+
+- **Symptoms:** a request to the machine's LAN address with `Host: 127.0.0.1:<port>` returned the full audit log, and POSTs without an `Origin` started supervisor runs and wrote settings.
+- **Root cause:** `parseListenAddress` in `backend/src/server.ts` accepted the wildcard addresses anywhere, and the `Host` check only stops browsers.
+- **Fix:** `0.0.0.0` and `::` need `AGENTDOCK_IN_CONTAINER=1`, which the Dockerfile sets; otherwise the backend does not start. Outside a container a connection from anything but loopback is closed.
+- **Verification:** `backend/tests/listen-address.test.ts`. `npm run docker:smoke` was not run locally.
+
+## I-18 · FIXED · A waiting approval dropped out of "Needs you" after 500 newer events
+
+- **Symptoms:** one `REQUIRE_MANUAL_APPROVAL` followed by 500 other calls showed nothing waiting, while the all-time count said 1.
+- **Root cause:** the Overview card, the sidebar count and Waiting on you were worked out in the browser from the snapshot's newest 500 events (`SNAPSHOT_LIMIT` in `backend/src/audit-reader.ts`).
+- **Fix:** `snapshot()` reads the 15-minute window with its own query into `approvals: { windowMs, events }`; `APPROVAL_WINDOW_MS` now lives in `audit-reader.ts` and reaches the browser as `approvals.windowMs`.
+- **Verification:** `regression:` tests in `backend/tests/audit-reader.test.ts` and `frontend/tests/pages.test.ts`.
+
+## I-19 · FIXED · An empty or relative `CTRLPLANE_HOME` let the project choose the supervisor and where the key goes
+
+- **Symptoms:** with `CTRLPLANE_HOME` set to `""` or `.ctrlplane`, an agent-written `supervisor.json` turned the supervisor on and the saved key was sent to a URL the agent chose.
+- **Root cause:** `backend/src/provider-resolver.ts` and the copied `supervisor-config.ts` used `??`, and nothing refused a relative path.
+- **Fix:** `supervisorHome()` treats empty as `~/.ctrlplane` and refuses a relative home or one inside a `--project` folder (`CONFIG_INVALID`); `supervisor-config.ts` is synced from agentdock-cli.
+- **Verification:** `backend/tests/supervisor-relative-home.test.ts`.
+
+## I-20 · FIXED · A cross-site GET could spend the saved key
+
+- **Symptoms:** a web page's no-cors `GET /api/supervisor/models` made the backend read the key and call the provider with it; each GET of `/api/supervisor/settings` read the keychain twice.
+- **Root cause:** the `Origin` check in `backend/src/server.ts` ran only on POST.
+- **Fix:** one gate for every method and the WebSocket upgrade: a foreign `Origin`, or `Sec-Fetch-Site` of `cross-site` or `same-site`, gets 403; a page navigation to a non-API path still opens the dashboard; the dev origin still passes.
+- **Verification:** `backend/tests/cross-site-get.test.ts`.
+
+## I-21 · FIXED · An unreadable audit log showed as an empty, safe-looking dashboard
+
+- **Symptoms:** with a required column missing, `GET /api/dashboard/state` answered 200 with no events; with the file locked the page said "No audit log found".
+- **Root cause:** `snapshot()` in `backend/src/audit-reader.ts` used `query()`, which swallows SQL errors.
+- **Fix:** the events, sessions and counts queries are strict and the route answers 503 `DB_UNAVAILABLE` or `SCHEMA_MISMATCH`; the page shows "Can't read the audit log". An older log without `rule_id` or `session_usage` still loads.
+- **Verification:** `regression:` tests in `backend/tests/dashboard-api.test.ts` and `frontend/tests/events.test.ts`.
+
+## I-22 · FIXED · `developerAnswers: {}` locked a spec with an API supervisor
+
+- **Symptoms:** with a model provider the empty answers went out as a finalize request and a locked specification came back; with the supervisor off the same body asked questions.
+- **Root cause:** `backend/src/server.ts` chose finalize for any truthy `developerAnswers`; the built-in interview treated `{}` as no answers.
+- **Fix:** one `interviewMode()` in `supervisor-provider.ts`, used by every provider and the built-in interview, needs a non-blank answer; a body whose answers are not strings gets 400; the dashboard and the extension no longer send `{}`.
+- **Verification:** `backend/tests/supervisor-interview-mode.test.ts`.
+
+## I-23 · FIXED · Three routes no client called, one of them pushing frames to every dashboard
+
+- **Symptoms:** `POST /api/events/broadcast` let any local process push WebSocket frames to open dashboards; `/api/supervisor/loop-check` and `/api/cost/calculate` were used only by tests.
+- **Root cause:** left over from earlier designs in `backend/src/server.ts`.
+- **Fix:** the routes, the WebSocket message types no one read, `checkTrajectoryForLoops` and `backend/src/token-pricing.ts` are deleted. The removed assertions are `CONSTRAINTS.md` exception E1.
+- **Verification:** `regression: the routes no client called answer 404` (`backend/tests/security.test.ts`).
+
+## I-24 · FIXED · The extension offered a key box whose keys nothing read
+
+- **Symptoms:** the sidebar stored a key in VS Code SecretStorage and said "saved to the OS keychain"; the backend reads keys only from the keychain, through the CLI.
+- **Root cause:** `extension/src/sidebar-provider.ts` and `secret-manager.ts` predate D-9 and agentdock-cli D-13.
+- **Fix:** the key box, its message and `secret-manager.ts` are removed; the sidebar points to `ctrlplane supervisor set-key`. The extension still cannot load (I-6), so no key was ever stored.
+- **Verification:** two `regression:` tests in `extension/tests/extension.test.ts`.
+
+## I-25 · FIXED · The copied `token-pricing.ts` kept a quadratic regex the CLI had fixed
+
+- **Symptoms:** `backend/src/token-pricing.ts` still had `.replace(/@.*$/, "")` after agentdock-cli replaced it (4d20642), reachable through `/api/cost/calculate` with a model name of up to 1 MB.
+- **Root cause:** files copied from agentdock-cli were updated by hand when someone remembered.
+- **Fix:** `scripts/cli-copies.ts` lists every copy, fails when one differs from agentdock-cli `main`, and `--sync` is the only way to update them. The file itself was later deleted with its route (I-23).
+- **Verification:** `scripts/tests/cli-copies.test.ts`; `npm run check:cli-copies` in CI.
