@@ -248,6 +248,14 @@ export function projectName(path: string | undefined): string {
 /** A project the backend watches, as `GET /api/projects` lists it. */
 export type ProjectSummary = { id: string; name: string; projectPath: string; available: boolean };
 
+/** The reason to show when `GET /api/dashboard/state` says the audit log exists but cannot be read; otherwise null. */
+export function auditReadProblem(status: number, body: unknown): string | null {
+  if (status !== 503) return null;
+  const { code, error } = (body ?? {}) as { code?: unknown; error?: unknown };
+  if (code !== "DB_UNAVAILABLE" && code !== "SCHEMA_MISMATCH") return null;
+  return typeof error === "string" && error !== "" ? error : "The audit database could not be read.";
+}
+
 export function projectFromSearch(search: string): string | null {
   return new URLSearchParams(search).get("project");
 }

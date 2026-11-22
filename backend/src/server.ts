@@ -373,7 +373,7 @@ export class AgentDockBackendServer {
     }
 
     if (req.method === "GET" && pathname === "/api/dashboard/state") {
-      this.sendJson(res, 200, project!.reader.snapshot());
+      this.readAudit(res, "state", () => [200, project!.reader.snapshot()], true);
       return;
     }
 
@@ -573,13 +573,21 @@ export class AgentDockBackendServer {
    * Answers a live-view read. A database that cannot be read gives 503 and one log line with the route and the
    * SQLite error code: never SQL text, the error message or the search text.
    */
-  private readAudit(res: ServerResponse, route: string, read: () => [number, unknown]): void {
+  private readAudit(res: ServerResponse, route: string, read: () => [number, unknown], reportSchema = false): void {
     try {
       const [status, body] = read();
       this.sendJson(res, status, body);
     } catch (err) {
       const code = err instanceof AuditReadError ? err.code : "unknown";
       console.error(`AgentDock Backend: ${route} read failed, code=${code}`);
+      if (reportSchema && err instanceof AuditReadError && err.schemaMismatch) {
+        this.sendJson(res, 503, {
+          error:
+            "The audit database is missing a table or column this dashboard reads. Update agentdock-cli and AgentDock to matching versions.",
+          code: "SCHEMA_MISMATCH",
+        });
+        return;
+      }
       this.sendJson(res, 503, { error: "The audit database could not be read. Try again.", code: "DB_UNAVAILABLE" });
     }
   }

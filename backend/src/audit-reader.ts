@@ -85,9 +85,12 @@ export interface PublicEvent extends DashboardEvent {
 /** The database exists but could not be read. Carries the SQLite error code only, never SQL text or values. */
 export class AuditReadError extends Error {
   public readonly code: string;
-  constructor(code: string) {
+  /** A table or column the reader needs is missing, as opposed to a locked or unreadable file. */
+  public readonly schemaMismatch: boolean;
+  constructor(code: string, schemaMismatch = false) {
     super("The audit database could not be read.");
     this.code = code;
+    this.schemaMismatch = schemaMismatch;
   }
 }
 
@@ -252,8 +255,9 @@ export class AuditReader {
     try {
       return db.prepare(sql).all(...params) as Row[];
     } catch (err) {
-      const code = (err as { code?: unknown } | null)?.code;
-      throw new AuditReadError(typeof code === "string" ? code : "unknown");
+      const { code, message } = (err ?? {}) as { code?: unknown; message?: unknown };
+      const missing = typeof message === "string" && /^no such (column|table):/.test(message);
+      throw new AuditReadError(typeof code === "string" ? code : "unknown", missing);
     }
   }
 
@@ -271,13 +275,20 @@ export class AuditReader {
     return `${BASE_EVENT_COLUMNS}, ${hasRuleId ? "e.rule_id" : "NULL"} AS rule_id`;
   }
 
+  /** Throws `AuditReadError` when the file exists but its events, sessions or counts cannot be read. */
   public snapshot(now = Date.now()): DashboardSnapshot {
-    const events = this.query(
+    const db = this.open();
+    if (!db && existsSync(this.databasePath)) throw new AuditReadError("unknown");
+    // A file with no tables yet is the daemon starting up, so it reads as empty; after that a failed read is an error.
+    const fresh =
+      !db || num(this.strictQuery("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table'")[0]?.n) === 0;
+    const read = fresh ? this.query.bind(this) : this.strictQuery.bind(this);
+    const events = read(
       `SELECT ${this.eventColumns()} FROM events e LEFT JOIN sessions s ON s.id = e.session_id ORDER BY e.rowid DESC LIMIT ?`,
       SNAPSHOT_LIMIT,
     ).map(toEvent);
 
-    const sessions = this.query(
+    const sessions = read(
       `SELECT s.id, s.agent_type, s.project_path, s.status, s.started_at, s.ended_at,
               coalesce(max(e.created_at), s.started_at) AS last_activity,
               coalesce(sum(e.event_type = 'pre_tool'), 0) AS tool_calls,
@@ -325,7 +336,7 @@ export class AuditReader {
       projectUsage = total && { ...total, sessions: num(recorded?.n) };
     }
 
-    const [totals] = this.query(
+    const [totals] = read(
       `SELECT coalesce(sum(event_type = 'pre_tool'), 0) AS tool_calls,
               coalesce(sum(event_type = 'pre_tool' AND policy_verdict = 'DENY'), 0) AS blocked,
               coalesce(sum(event_type = 'pre_tool' AND policy_verdict = 'REQUIRE_MANUAL_APPROVAL'), 0) AS review,

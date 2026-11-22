@@ -6,6 +6,7 @@ import {
   type Page,
   type ProjectSummary,
   approvalRequests,
+  auditReadProblem,
   isForProject,
   pageFromHash,
   projectFromSearch,
@@ -109,6 +110,7 @@ function NavIcon({ page }: { page: Page }) {
 export default function Dashboard() {
   const [page, setPage] = useState<Page>("overview");
   const [snapshot, setSnapshot] = useState(EMPTY);
+  const [readProblem, setReadProblem] = useState<string | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [connected, setConnected] = useState(false);
   const [backendReachable, setBackendReachable] = useState(false);
@@ -168,8 +170,10 @@ export default function Dashboard() {
           setPickedId(null);
           return;
         }
-        if (!response.ok) throw new Error("Dashboard API unavailable");
-        const state = (await response.json()) as DashboardSnapshot;
+        // The log exists but cannot be read: say why rather than show empty lists that look like nothing needs you.
+        const problem = response.status === 503 ? auditReadProblem(503, await response.json().catch(() => null)) : null;
+        if (!response.ok && problem === null) throw new Error("Dashboard API unavailable");
+        const state = problem === null ? ((await response.json()) as DashboardSnapshot) : null;
         const status = await fetch(`${API_ORIGIN}/api/health`, { cache: "no-store" })
           .then((r) => r.json() as Promise<Health>)
           .catch(() => null);
@@ -179,7 +183,8 @@ export default function Dashboard() {
         // An answer for a project the developer has since switched away from is dropped.
         if (!disposed && pickedRef.current === picked) {
           setProjects(list.projects);
-          setSnapshot(state);
+          if (state) setSnapshot(state);
+          setReadProblem(problem);
           setHealth(status);
           setBackendReachable(true);
           setNow(Date.now());
@@ -257,6 +262,7 @@ export default function Dashboard() {
     url.searchParams.set("project", id);
     window.history.pushState(null, "", url);
     setSnapshot(EMPTY);
+    setReadProblem(null);
     setPickedId(id);
   }
 
@@ -357,7 +363,16 @@ export default function Dashboard() {
               </span>
             </div>
           )}
-          {backendReachable && snapshot.source && !snapshot.source.available && page !== "project" && (
+          {backendReachable && readProblem && (
+            <div className="panel notice-panel" role="alert">
+              <strong>Can&apos;t read the audit log: {readProblem}</strong>
+              <p>
+                The backend reads <code>{snapshot.source?.databasePath ?? ".ctrlplane/audit.db"}</code> and retries on
+                its own. Your agents are still supervised: rules run in the CLI, not in this page.
+              </p>
+            </div>
+          )}
+          {backendReachable && !readProblem && snapshot.source && !snapshot.source.available && page !== "project" && (
             <div className="panel notice-panel" role="status">
               <strong>No audit log found</strong>
               <p>
@@ -367,7 +382,7 @@ export default function Dashboard() {
               </p>
             </div>
           )}
-          {page === "overview" && (
+          {page === "overview" && !readProblem && (
             <Overview
               snapshot={snapshot}
               connected={connected}
@@ -376,9 +391,11 @@ export default function Dashboard() {
               onCopy={copy}
             />
           )}
-          {page === "waiting" && <Waiting snapshot={snapshot} now={now} />}
-          {page === "sessions" && <Sessions snapshot={snapshot} now={now} apiOrigin={API_ORIGIN} projectId={shownId} />}
-          {page === "rules" && <Rules snapshot={snapshot} onCopy={copy} />}
+          {page === "waiting" && !readProblem && <Waiting snapshot={snapshot} now={now} />}
+          {page === "sessions" && !readProblem && (
+            <Sessions snapshot={snapshot} now={now} apiOrigin={API_ORIGIN} projectId={shownId} />
+          )}
+          {page === "rules" && !readProblem && <Rules snapshot={snapshot} onCopy={copy} />}
           {/* Stays mounted so a running plan or Codex explanation keeps its answer across page switches. */}
           <div hidden={page !== "plan"}>
             <PlanReview
