@@ -10,14 +10,7 @@ export interface SessionSummary {
 }
 
 export interface WSEventMessage {
-  type:
-    | "agent_tool_executing"
-    | "agent_tool_completed"
-    | "agent_session_updated"
-    | "policy_verdict_emitted"
-    | "circuit_breaker_alert"
-    | "spec_updated"
-    | "verification_completed";
+  type: "agent_tool_executing" | "agent_tool_completed" | "agent_session_updated";
   sessionId: string;
   timestamp: number;
   data: Record<string, unknown>;
@@ -48,16 +41,4 @@ export interface SupervisorInterviewResponse {
     specHash: string;
     instructionsForAgent2: string;
   };
-}
-
-export interface TrajectoryLoopCheckRequest {
-  sessionId: string;
-  recentTools: Array<{ toolName: string; input: unknown; exitCode?: number; error?: string }>;
-}
-
-export interface TrajectoryLoopCheckResponse {
-  loopDetected: boolean;
-  consecutiveFailureCount: number;
-  recommendation: "CONTINUE" | "WARN_AGENT" | "HALT_FOR_DEVELOPER";
-  message: string;
 }

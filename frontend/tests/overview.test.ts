@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   type DashboardEvent,
-  APPROVAL_WINDOW_MS,
   agentLabel,
   eventTarget,
   filterStream,
@@ -12,6 +11,9 @@ import {
   streamCounts,
   unseenEvents,
 } from "../src/lib/events.ts";
+
+// The window the backend sends as `approvals.windowMs`.
+const APPROVAL_WINDOW_MS = 15 * 60 * 1000;
 
 const event = (id: string, over: Partial<DashboardEvent> = {}): DashboardEvent => ({
   id,
@@ -84,7 +86,7 @@ test("only approval requests from the last 15 minutes count as waiting, newest f
     event("observed", { decision: "REQUIRE_MANUAL_APPROVAL", observedOnly: true, timestamp: now - 1_000 }),
   ];
   assert.deepEqual(
-    recentApprovalRequests(events, now).map((e) => e.id),
+    recentApprovalRequests({ windowMs: APPROVAL_WINDOW_MS, events }, now).map((e) => e.id),
     ["new", "edge"],
   );
 });

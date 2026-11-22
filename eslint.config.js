@@ -24,5 +24,26 @@ export default tseslint.config(
     files: ["frontend/src/**/*.tsx", "frontend/src/**/*.ts"],
     languageOptions: { globals: { ...globals.browser } },
   },
+  {
+    // The CLI's tables are written once, in fixtures/cli-schema.sql; a hand-written copy drifts from what the CLI
+    // creates (six copies diverged before this rule). An older CLI's layout is the fixture with parts dropped.
+    files: ["backend/tests/**/*.ts", "frontend/tests/**/*.ts", "scripts/**/*.ts"],
+    ignores: ["backend/tests/live-view-fixture.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "Literal[value=/CREATE TABLE (IF NOT EXISTS )?(sessions|events|session_usage)\\b/]",
+          message:
+            "Use applyCliSchema(), cliTable() or createAuditDb() from backend/tests/live-view-fixture.ts; they read fixtures/cli-schema.sql.",
+        },
+        {
+          selector: "TemplateElement[value.raw=/CREATE TABLE (IF NOT EXISTS )?(sessions|events|session_usage)\\b/]",
+          message:
+            "Use applyCliSchema(), cliTable() or createAuditDb() from backend/tests/live-view-fixture.ts; they read fixtures/cli-schema.sql.",
+        },
+      ],
+    },
+  },
   prettier,
 );

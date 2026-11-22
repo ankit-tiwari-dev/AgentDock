@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   type DashboardEvent,
+  auditReadProblem,
   eventStatus,
   isToolFailure,
   relativeTime,
@@ -74,4 +75,17 @@ test("when the audit log names the rule, decisions are grouped by rule ID", () =
     rules.map((r) => [r.id, r.count, r.latestReason]),
     [["RULE-BLOCK-DESTRUCTIVE-SHELL", 2, "Recursive delete of /etc"]],
   );
+});
+
+test("regression: a 503 from the state route is a reason to show, not an empty audit log", () => {
+  const reason = "The audit database is missing a table or column this dashboard reads.";
+  assert.equal(auditReadProblem(503, { error: reason, code: "SCHEMA_MISMATCH" }), reason);
+  assert.equal(
+    auditReadProblem(503, { error: "The audit database could not be read. Try again.", code: "DB_UNAVAILABLE" }),
+    "The audit database could not be read. Try again.",
+  );
+  assert.equal(auditReadProblem(503, { code: "DB_UNAVAILABLE" }), "The audit database could not be read.");
+  assert.equal(auditReadProblem(503, { error: "Supervisor busy", code: "OTHER" }), null);
+  assert.equal(auditReadProblem(503, null), null);
+  assert.equal(auditReadProblem(200, { error: reason, code: "SCHEMA_MISMATCH" }), null);
 });

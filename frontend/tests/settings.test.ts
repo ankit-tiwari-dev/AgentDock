@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { type SettingsView, settingsView, supervisorLabel, supervisorStatus } from "../src/lib/settings.ts";
+import {
+  type SettingsView,
+  modelListFor,
+  settingsView,
+  supervisorLabel,
+  supervisorStatus,
+} from "../src/lib/settings.ts";
 
 const view = (over: Partial<SettingsView> = {}): SettingsView => ({
   provider: "claude",
@@ -96,4 +102,24 @@ test("the Plan & review line names provider and model, and says the built-in sup
   );
   assert.equal(supervisorLabel({ provider: null, model: null, keySaved: null, ready: false }), "Supervisor: built-in");
   assert.equal(supervisorLabel(null), "Supervisor: built-in");
+});
+
+test("regression: saving does not refetch the model list or reset the picked model", () => {
+  const before = view();
+  // A save answers with a new settings object; the model list is keyed on the picked provider alone.
+  const afterSave = view({ model: "claude-sonnet-5-5" });
+  assert.equal(modelListFor("claude", before), "claude");
+  assert.equal(modelListFor("claude", afterSave), modelListFor("claude", before));
+  const withBothKeys = view({ keys: { claude: true, "openai-compatible": true } });
+  assert.equal(modelListFor("openai-compatible", withBothKeys), "openai-compatible");
+  // Codex has no list, and nothing is fetched before the settings arrive.
+  assert.equal(modelListFor("codex", before), null);
+  assert.equal(modelListFor("claude", null), null);
+});
+
+test("regression: no model list is requested for a provider without a saved key", () => {
+  // The list call uses the key, so without one the backend answers 503 and the page logs an error.
+  assert.equal(modelListFor("openai-compatible", view()), null);
+  assert.equal(modelListFor("claude", view({ keys: { claude: false, "openai-compatible": false } })), null);
+  assert.equal(modelListFor("claude", view({ keys: { claude: null, "openai-compatible": null } })), null);
 });

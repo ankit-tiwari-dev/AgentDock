@@ -2,6 +2,7 @@ import type * as SdkModule from "@anthropic-ai/sdk";
 import type { BetaMessage } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import {
   SupervisorError,
+  interviewMode,
   scrub,
   type RunContext,
   type RunMode,
@@ -65,7 +66,7 @@ export class ClaudeProvider implements SupervisorProvider {
     developerAnswers?: Record<string, string>,
     ctx?: RunContext,
   ): Promise<SupervisorResult> {
-    return (await this.run(developerAnswers ? "finalize" : "questions", ctx)) as SupervisorResult;
+    return (await this.run(interviewMode(developerAnswers), ctx)) as SupervisorResult;
   }
 
   async review(ctx?: RunContext): Promise<ReviewResult> {

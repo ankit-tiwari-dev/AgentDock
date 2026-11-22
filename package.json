@@ -18,14 +18,23 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "hygiene": "node scripts/hygiene.ts",
-    "docker:smoke": "node scripts/docker-smoke.ts"
+    "docker:smoke": "node scripts/docker-smoke.ts",
+    "test:coverage": "node -e \"fs.mkdirSync('coverage', { recursive: true })\" && node --test --import ./scripts/test-env.ts --test-timeout=60000 --experimental-test-coverage --test-reporter=dot --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info backend/tests/*.test.ts frontend/tests/*.test.ts extension/tests/*.test.ts scripts/tests/*.test.ts",
+    "check:floor": "node scripts/floor-guard.ts",
+    "check:coverage": "npm run --silent test:coverage && node scripts/warn-window.ts 2026-12-05 scripts/coverage-gate.ts coverage/lcov.info",
+    "check:arch": "node scripts/warn-window.ts 2026-12-05 node_modules/dependency-cruiser/bin/dependency-cruiser.mjs backend/src frontend/src extension/src --config .dependency-cruiser.mjs --output-type err",
+    "check:cli-copies": "node scripts/warn-window.ts 2026-12-05 scripts/cli-copies.ts",
+    "check:pages": "node scripts/warn-window.ts 2026-12-05 scripts/page-check.ts --check",
+    "check:task": "node scripts/agent-check.ts task"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/node": "^22.0.0",
+    "dependency-cruiser": "18.7.2",
     "eslint": "10.15.0",
     "eslint-config-prettier": "10.1.8",
     "globals": "17.14.0",
+    "lighthouse": "13.6.0",
     "prettier": "3.9.10",
     "typescript": "5.9.3",
     "typescript-eslint": "8.73.0"

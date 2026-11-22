@@ -60,7 +60,14 @@ export type DashboardSnapshot = {
     /** False when the CLI that wrote the audit log does not record cost. */
     usageRecorded: boolean;
   };
+  approvals: ApprovalWindow;
 };
+
+/**
+ * The backend reads the approval requests of the last `windowMs` (D-6) apart from the newest events, so a busy agent
+ * cannot push one out, with the later events "Ran afterwards" (D-7) compares them with.
+ */
+export type ApprovalWindow = { windowMs: number; events: DashboardEvent[] };
 
 /** An event from search or the session timeline. A large output is kept outside the database and not sent. */
 export type PublicEvent = DashboardEvent & {
@@ -166,9 +173,6 @@ export function statusTone(status: string): string {
 
 export type StreamFilter = "all" | "Blocked" | "Needs approval";
 
-/** The audit log does not record whether an approval was answered, so an older request is treated as no longer waiting. */
-export const APPROVAL_WINDOW_MS = 15 * 60 * 1000;
-
 const TARGET_KEYS = ["command", "file_path", "pattern", "path", "url", "query"];
 
 export function eventTarget(event: DashboardEvent): string {
@@ -214,9 +218,9 @@ export function filterStream(events: DashboardEvent[], filter: StreamFilter, que
   });
 }
 
-export function recentApprovalRequests(events: DashboardEvent[], now = Date.now()): DashboardEvent[] {
-  return events
-    .filter((event) => eventStatus(event) === "Needs approval" && now - event.timestamp <= APPROVAL_WINDOW_MS)
+export function recentApprovalRequests(approvals: ApprovalWindow, now = Date.now()): DashboardEvent[] {
+  return approvals.events
+    .filter((event) => eventStatus(event) === "Needs approval" && now - event.timestamp <= approvals.windowMs)
     .sort((a, b) => b.timestamp - a.timestamp);
 }
 
@@ -243,6 +247,14 @@ export function projectName(path: string | undefined): string {
 
 /** A project the backend watches, as `GET /api/projects` lists it. */
 export type ProjectSummary = { id: string; name: string; projectPath: string; available: boolean };
+
+/** The reason to show when `GET /api/dashboard/state` says the audit log exists but cannot be read; otherwise null. */
+export function auditReadProblem(status: number, body: unknown): string | null {
+  if (status !== 503) return null;
+  const { code, error } = (body ?? {}) as { code?: unknown; error?: unknown };
+  if (code !== "DB_UNAVAILABLE" && code !== "SCHEMA_MISMATCH") return null;
+  return typeof error === "string" && error !== "" ? error : "The audit database could not be read.";
+}
 
 export function projectFromSearch(search: string): string | null {
   return new URLSearchParams(search).get("project");
@@ -272,38 +284,108 @@ export function pageFromHash(hash: string): Page {
  * the newest such request before it, so an earlier, denied request for the same command does not look run.
  */
 export function ranAfterwards(request: DashboardEvent, events: DashboardEvent[]): boolean {
-  const target = eventTarget(request);
-  const same = (event: DashboardEvent) =>
-    event.sessionId === request.sessionId && event.toolName === request.toolName && eventTarget(event) === target;
-  const askedAgain = events
-    .filter(
-      (event) =>
-        event.id !== request.id &&
-        eventStatus(event) === "Needs approval" &&
-        event.timestamp > request.timestamp &&
-        same(event),
-    )
-    .reduce((first, event) => Math.min(first, event.timestamp), Infinity);
-  return events.some(
-    (event) =>
-      event.hookEventName === "PostToolUse" &&
-      event.timestamp >= request.timestamp &&
-      event.timestamp < askedAgain &&
-      same(event),
-  );
+  return ranAfterwardsIndex(events)(request);
 }
 
+type RanGroup = { askTimes: number[]; askIds: string[]; completions: number[] };
+
+// JSON keeps a "|" in a session id, or a missing tool name, from colliding with another group's key.
+const ranKey = (event: DashboardEvent, target: string) =>
+  JSON.stringify([event.sessionId, event.toolName ?? null, target]);
+
+/** The first index in an ascending list whose value is at least `time`, or above it when `after` is set. */
+function firstAt(times: number[], time: number, after: boolean): number {
+  let low = 0;
+  let high = times.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    const value = times[mid] as number;
+    if (value < time || (after && value === time)) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
+
+/**
+ * `ranAfterwards` for many requests against one list. Each event's target is read once and the events are grouped
+ * by session, tool and target, so each answer is two binary searches instead of two scans of every event.
+ */
+export function ranAfterwardsIndex(events: DashboardEvent[]): (request: DashboardEvent) => boolean {
+  const pending = new Map<string, { asks: DashboardEvent[]; completions: number[] }>();
+  for (const event of events) {
+    const asks = eventStatus(event) === "Needs approval";
+    if (!asks && event.hookEventName !== "PostToolUse") continue;
+    const key = ranKey(event, eventTarget(event));
+    let group = pending.get(key);
+    if (!group) pending.set(key, (group = { asks: [], completions: [] }));
+    if (asks) group.asks.push(event);
+    else group.completions.push(event.timestamp);
+  }
+  const groups = new Map<string, RanGroup>();
+  for (const [key, { asks, completions }] of pending) {
+    if (completions.length === 0) continue;
+    asks.sort((a, b) => a.timestamp - b.timestamp);
+    groups.set(key, {
+      askTimes: asks.map((event) => event.timestamp),
+      askIds: asks.map((event) => event.id),
+      completions: completions.sort((a, b) => a - b),
+    });
+  }
+  return (request) => {
+    const group = groups.get(ranKey(request, eventTarget(request)));
+    if (!group) return false;
+    let next = firstAt(group.askTimes, request.timestamp, true);
+    // The request never counts as asking again, even when the list holds an event with its id at a later time.
+    while (next < group.askIds.length && group.askIds[next] === request.id) next++;
+    const askedAgain = group.askTimes[next] ?? Infinity;
+    const completed = group.completions[firstAt(group.completions, request.timestamp, false)];
+    return completed !== undefined && completed < askedAgain;
+  };
+}
+
+/** Recent requests come from the snapshot's approvals; earlier ones are only those still among its newest events. */
 export function approvalRequests(
-  events: DashboardEvent[],
+  snapshot: Pick<DashboardSnapshot, "events" | "approvals">,
   now = Date.now(),
 ): { recent: DashboardEvent[]; earlier: DashboardEvent[]; waiting: DashboardEvent[]; open: number } {
-  const requests = events
-    .filter((event) => eventStatus(event) === "Needs approval")
+  const { windowMs, events } = snapshot.approvals;
+  const recent = recentApprovalRequests(snapshot.approvals, now);
+  const earlier = snapshot.events
+    .filter((event) => eventStatus(event) === "Needs approval" && now - event.timestamp > windowMs)
     .sort((a, b) => b.timestamp - a.timestamp);
-  const recent = requests.filter((event) => now - event.timestamp <= APPROVAL_WINDOW_MS);
-  const earlier = requests.filter((event) => now - event.timestamp > APPROVAL_WINDOW_MS);
-  const waiting = recent.filter((event) => !ranAfterwards(event, events));
+  const ran = ranAfterwardsIndex(events);
+  const waiting = recent.filter((event) => !ran(event));
   return { recent, earlier, waiting, open: waiting.length };
+}
+
+/** When the next recent approval request leaves the window (D-6), or null when none is in it. */
+export function nextApprovalExpiry(approvals: ApprovalWindow, now: number): number | null {
+  let next: number | null = null;
+  for (const event of approvals.events) {
+    // recentApprovalRequests keeps a request while now - timestamp <= windowMs, so it leaves 1 ms after that.
+    const leaves = event.timestamp + approvals.windowMs + 1;
+    if (leaves > now && eventStatus(event) === "Needs approval" && (next === null || leaves < next)) next = leaves;
+  }
+  return next;
+}
+
+/** Each session's count of requests with no record they ran, and its verdict strip, from one pass over the events. */
+export function sessionSummaries(events: DashboardEvent[]): Map<string, { waiting: number; marks: StripMark[] }> {
+  const timelines = new Map<string, DashboardEvent[]>();
+  for (const event of events) {
+    if (!event.toolName) continue;
+    const timeline = timelines.get(event.sessionId);
+    if (timeline) timeline.push(event);
+    else timelines.set(event.sessionId, [event]);
+  }
+  const ran = ranAfterwardsIndex(events);
+  const summaries = new Map<string, { waiting: number; marks: StripMark[] }>();
+  for (const [id, timeline] of timelines) {
+    timeline.sort((a, b) => b.timestamp - a.timestamp);
+    const waiting = timeline.filter((event) => eventStatus(event) === "Needs approval" && !ran(event)).length;
+    summaries.set(id, { waiting, marks: verdictStrip(timeline) });
+  }
+  return summaries;
 }
 
 export function sessionTimeline(events: DashboardEvent[], sessionId: string): DashboardEvent[] {

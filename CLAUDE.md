@@ -10,6 +10,7 @@
 
 ## Run everything through make
 
+- Read `CONSTRAINTS.md` before writing code. Do not weaken it to make a change pass. `make constraints` runs its checks; the hooks in `.claude/settings.json` run them after each edit and at task end.
 - Run every gate from the repo root through `make`: `make ci` (lint, typecheck, build, hygiene, test, in CI's order), or one of `make lint`, `make typecheck`, `make build`, `make hygiene`, `make test`. `make format` fixes Prettier.
 - Read the real exit code: `make ci > ci.log 2>&1; echo "make ci rc=$?"`. NEVER pipe `make` into `tail`, `head` or `grep` and read that as pass or fail. Only `rc=0` is green. Delete `ci.log` afterwards; `hygiene` fails on `*.log`.
 - NEVER say a change is done without a green `make ci` and its test counts.
@@ -48,7 +49,36 @@
 - NEVER name, quote or point at planning documents in any repo file, commit or PR.
 - Full rules for tests, docs, security, PRs, self-correction and adding instructions: `.claude/docs/rules.md`.
 
+## Rules and what enforces them
+
+When the developer corrects a mistake, fix it and add its rule here. A rule whose enforcer is "nothing" is a judgment call; if its mistake happens again, enforce it at the highest level that works (one owner in the code, then a type, then a lint or CI check, then a test) in the same change, and drop the rule once the mistake cannot happen.
+
+| Rule                                                                                                    | Enforced by                                                                                    |
+| ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Only erasable TypeScript                                                                                | `erasableSyntaxOnly` in `tsconfig.json` (`make typecheck`)                                     |
+| A file copied from agentdock-cli is changed there, then updated here with `--sync`                      | `scripts/cli-copies.ts` (`npm run check:cli-copies`, CI; warns until 2026-12-05)               |
+| Tests and scripts build the CLI's tables only from `fixtures/cli-schema.sql`                            | `applyCliSchema()` / `createAuditDb()` in `backend/tests/live-view-fixture.ts`; ESLint         |
+| The backend's only npm dependency is `@anthropic-ai/sdk` (D-10)                                         | dependency-cruiser (`npm run check:arch`; warns until 2026-12-05)                              |
+| backend, frontend and extension never import each other                                                 | dependency-cruiser (`npm run check:arch`)                                                      |
+| No suppression comments, stubs, skipped or deleted tests, removed assertions, weakened `CONSTRAINTS.md` | `scripts/floor-guard.ts` (after each edit and in CI)                                           |
+| Tests never read the developer's `CTRLPLANE_HOME`, keychain or supervisor switches                      | `scripts/test-env.ts`, `backend/tests/test-isolation.test.ts`                                  |
+| Tests and browser checks use throwaway projects, never a real one                                       | partly: `scripts/test-env.ts`; starting the backend on a real project is still a judgment call |
+| Read `make`'s real exit code; never pipe it into `tail` and call it green                               | the Stop hook runs the task-end checks itself and reads their exit codes                       |
+| Every bug fix gets a `regression:` test that fails before the fix                                       | nothing: judgment                                                                              |
+| A doc that contradicts the code is fixed in the same change                                             | nothing: judgment (`dead-weight` skill before merge)                                           |
+| No planning-document names or references in the repo                                                    | `scripts/hygiene.ts`                                                                           |
+
 ## Code comments
 
 - Comment only a non-obvious why: a security reason, a platform quirk, a rule from a decision.
 - One sentence. No block comments, no step-by-step comments, no notes about your own edit.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in this repo's GitHub Issues (via the `gh` CLI). See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` at the repo root; decisions go in `docs/DECISIONS.md` (D-N), not `docs/adr/`. See `docs/agents/domain.md`.

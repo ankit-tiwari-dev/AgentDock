@@ -9,11 +9,11 @@ The supervisor itself (hooks, policy engine, audit trail, context packs) lives i
 
 ## What is here
 
-| Workspace    | What it is                                                                                                                                                                                                                         |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `backend/`   | A plain `node:http` server on `127.0.0.1:45820`. It reads a project's audit log, serves it as JSON and as a live WebSocket stream (`/ws/events`), runs the Plan & review and token cost endpoints, and serves the built dashboard. |
-| `frontend/`  | The dashboard, a Next.js app exported to static files in `frontend/out`: Overview, Waiting on you, Sessions, Rules, Plan & review, Project and Settings (`docs/DECISIONS.md` → D-7, D-9).                                          |
-| `extension/` | Sidebar webview, message handling and key storage for an editor extension. It is not yet a loadable extension: there is no `activate` entry point and no build step (`ISSUE.md` → I-6).                                            |
+| Workspace    | What it is                                                                                                                                                                                                          |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `backend/`   | A plain `node:http` server on `127.0.0.1:45820`. It reads a project's audit log, serves it as JSON and as a live WebSocket stream (`/ws/events`), runs the Plan & review endpoints, and serves the built dashboard. |
+| `frontend/`  | The dashboard, a Next.js app exported to static files in `frontend/out`: Overview, Waiting on you, Sessions, Rules, Plan & review, Project and Settings (`docs/DECISIONS.md` → D-7, D-9).                           |
+| `extension/` | Sidebar webview, message handling and key storage for an editor extension. It is not yet a loadable extension: there is no `activate` entry point and no build step (`ISSUE.md` → I-6).                             |
 
 ### Where the data comes from
 
@@ -40,14 +40,14 @@ If the project has no audit log yet, the dashboard says so and shows the path it
 
 ### Settings
 
-| Variable                                 | Default         | Effect                                                                                                                                                    |
-| ---------------------------------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--project <path>` / `AGENTDOCK_PROJECT` | current folder  | The project whose `.ctrlplane/audit.db` is shown. Repeat `--project` to watch several; the sidebar then has a project picker (`docs/DECISIONS.md` → D-8). |
-| `AGENTDOCK_CODEX=1`                      | off             | Plan & review uses Codex when no `supervisor.json` exists (see [Supervisor providers](#supervisor-providers)). Off, planning uses built-in questions.     |
-| `AGENTDOCK_CODEX_PATH`                   | found on `PATH` | The Codex CLI executable to run.                                                                                                                          |
-| `AGENTDOCK_DEV_ORIGIN`                   | off             | Lets the Next.js dev server call the API, for example `http://localhost:3000`. Only a localhost or 127.0.0.1 address is accepted.                         |
-| `AGENTDOCK_HOST`                         | `127.0.0.1`     | The address to listen on: `127.0.0.1`, `::1`, or `0.0.0.0` / `::` inside a container (see below). Anything else stops the backend.                        |
-| `AGENTDOCK_PORT`                         | `45820`         | The port to listen on.                                                                                                                                    |
+| Variable                                 | Default         | Effect                                                                                                                                                                             |
+| ---------------------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--project <path>` / `AGENTDOCK_PROJECT` | current folder  | The project whose `.ctrlplane/audit.db` is shown. Repeat `--project` to watch several; the sidebar then has a project picker (`docs/DECISIONS.md` → D-8).                          |
+| `AGENTDOCK_CODEX=1`                      | off             | Plan & review uses Codex when no `supervisor.json` exists (see [Supervisor providers](#supervisor-providers)). Off, planning uses built-in questions.                              |
+| `AGENTDOCK_CODEX_PATH`                   | found on `PATH` | The Codex CLI executable to run.                                                                                                                                                   |
+| `AGENTDOCK_DEV_ORIGIN`                   | off             | Lets the Next.js dev server call the API, for example `http://localhost:3000`. Only a localhost or 127.0.0.1 address is accepted.                                                  |
+| `AGENTDOCK_HOST`                         | `127.0.0.1`     | The address to listen on: `127.0.0.1`, `::1`, or `0.0.0.0` / `::` only in the container image, which sets `AGENTDOCK_IN_CONTAINER=1` (see below). Anything else stops the backend. |
+| `AGENTDOCK_PORT`                         | `45820`         | The port to listen on.                                                                                                                                                             |
 
 ## Supervisor providers
 
@@ -91,7 +91,14 @@ Why it works this way: [`docs/DECISIONS.md`](docs/DECISIONS.md) → D-3, D-9, D-
 
 ## Run with Docker
 
-Needs only Docker. From a clone of this repo:
+Needs only Docker. Each release publishes a signed image (D-14). Check where it came from, then run it:
+
+```bash
+gh attestation verify oci://ghcr.io/ankit-tiwari-dev/agentdock:<version> -R ankit-tiwari-dev/AgentDock
+docker run --rm -p 127.0.0.1:45820:45820 -v /path/to/your/project:/project:ro ghcr.io/ankit-tiwari-dev/agentdock:<version>
+```
+
+Or build it yourself from a clone of this repo:
 
 ```bash
 AGENTDOCK_PROJECT_DIR=/path/to/your/project docker compose up --build
@@ -119,7 +126,7 @@ The image holds Node, the backend and the built dashboard, and runs as a non-roo
 
 ## Security model
 
-The backend binds to `127.0.0.1` by default and has no login. It accepts a request only when:
+The backend binds to `127.0.0.1` by default and has no login. Outside the container it closes any connection that does not come from this machine. It accepts a request only when:
 
 - the `Host` header is this machine (`127.0.0.1`, `localhost` or `[::1]` on the server's port), which stops DNS rebinding;
 - a browser request comes from the dashboard's own origin, and a POST is `application/json`, so other websites cannot drive the API;

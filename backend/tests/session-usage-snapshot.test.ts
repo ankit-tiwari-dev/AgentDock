@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { AuditReader } from "../src/audit-reader.ts";
 import { parseSearchQuery, parseTimelineQuery } from "../src/event-query.ts";
-import { createAuditDb } from "./live-view-fixture.ts";
+import { createAuditDb, cliTable } from "./live-view-fixture.ts";
 
 const searchAll = () => {
   const p = parseSearchQuery(new URLSearchParams("q=echo"));
@@ -127,12 +127,7 @@ test("a session_usage table created while the backend runs is picked up on the n
   try {
     a.seedSession("s1");
     assert.equal(reader.snapshot().counts.usageRecorded, false);
-    a.db.exec(`CREATE TABLE session_usage (
-      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, model TEXT NOT NULL,
-      input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0,
-      cache_read_tokens INTEGER NOT NULL DEFAULT 0, cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
-      cost_usd REAL NOT NULL DEFAULT 0, unknown_model INTEGER NOT NULL DEFAULT 0, turns INTEGER NOT NULL DEFAULT 0,
-      updated_at INTEGER NOT NULL, PRIMARY KEY (session_id, model));`);
+    a.db.exec(cliTable("session_usage"));
     a.seedUsage("s1", [{ model: "claude-opus-5-5", inputTokens: 3, costUsd: 0.1 }]);
     const snap = reader.snapshot();
     assert.equal(snap.counts.usageRecorded, true);

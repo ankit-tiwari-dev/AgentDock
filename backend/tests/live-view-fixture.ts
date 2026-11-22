@@ -45,16 +45,38 @@ export interface AuditDb {
   cleanup(): void;
 }
 
-/** A project folder with `.ctrlplane/audit.db` laid out exactly as the CLI writes it (`fixtures/cli-schema.sql`). */
-export function createAuditDb(o: { withUsage?: boolean; withCreatedAtIndex?: boolean } = {}): AuditDb {
-  const dir = mkdtempSync(join(tmpdir(), "agentdock-live-"));
-  mkdirSync(join(dir, ".ctrlplane"));
-  const dbPath = join(dir, ".ctrlplane", "audit.db");
-  const db = new DatabaseSync(dbPath);
+/** Which parts of today's schema an older agentdock-cli did not create yet. Every part is there by default. */
+export interface SchemaParts {
+  /** `session_usage` (cost per session and model). */
+  withUsage?: boolean;
+  /** `events.rule_id` (the rule behind a decision). */
+  withRuleId?: boolean;
+  withCreatedAtIndex?: boolean;
+}
+
+/** Creates the CLI's tables in `db` from `fixtures/cli-schema.sql`, the one copy of them in this repo. */
+export function applyCliSchema(db: DatabaseSync, o: SchemaParts = {}): void {
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec(CLI_SCHEMA);
   if (o.withUsage === false) db.exec("DROP TABLE session_usage;");
   if (o.withCreatedAtIndex === false) db.exec("DROP INDEX idx_events_created_at;");
+  if (o.withRuleId === false) db.exec("ALTER TABLE events DROP COLUMN rule_id;");
+}
+
+/** One table's CREATE statement from the fixture, for a test where the table appears while the backend runs. */
+export function cliTable(name: string): string {
+  const m = new RegExp(String.raw`CREATE TABLE IF NOT EXISTS ${name} \([\s\S]*?\n\);`).exec(CLI_SCHEMA);
+  if (!m) throw new Error(`fixtures/cli-schema.sql has no table ${name}`);
+  return m[0];
+}
+
+/** A project folder with `.ctrlplane/audit.db` laid out exactly as the CLI writes it (`fixtures/cli-schema.sql`). */
+export function createAuditDb(o: SchemaParts = {}): AuditDb {
+  const dir = mkdtempSync(join(tmpdir(), "agentdock-live-"));
+  mkdirSync(join(dir, ".ctrlplane"));
+  const dbPath = join(dir, ".ctrlplane", "audit.db");
+  const db = new DatabaseSync(dbPath);
+  applyCliSchema(db, o);
 
   const nextSeq = new Map<string, number>();
   let clock = 1_763_450_000_000;

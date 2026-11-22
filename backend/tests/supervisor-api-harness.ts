@@ -185,6 +185,8 @@ export async function withApiBackend(
     big?: boolean;
     /** A built dashboard to serve, for checks on the served pages. */
     staticRoot?: string;
+    /** null leaves the server to find supervisor.json from `env`, as a real start does. */
+    supervisorHome?: null;
   },
   fn: (h: Harness) => Promise<void>,
 ) {
@@ -205,7 +207,7 @@ export async function withApiBackend(
   const server = new AgentDockBackendServer({
     port: 0,
     projectPaths: [a, b],
-    supervisorHome: home,
+    ...(o.supervisorHome === null ? {} : { supervisorHome: home }),
     env: o.env ?? {},
     keychain: { platform: "linux", runner },
     anthropicBaseUrl: fake.url,

@@ -6,12 +6,14 @@ import {
   type Page,
   type ProjectSummary,
   approvalRequests,
+  auditReadProblem,
   isForProject,
   pageFromHash,
   projectFromSearch,
   projectName,
   projectQuery,
 } from "../lib/events";
+import { createRefreshQueue } from "../lib/refresh-queue";
 import Overview, { WarnIcon } from "./overview";
 import PlanReview from "./plan-review";
 import Project, { type Health } from "./project";
@@ -32,6 +34,7 @@ const EMPTY: DashboardSnapshot = {
     usage: null,
     usageRecorded: true,
   },
+  approvals: { windowMs: 0, events: [] },
 };
 const API_ORIGIN =
   process.env.NEXT_PUBLIC_BACKEND_API_ORIGIN ||
@@ -108,6 +111,7 @@ function NavIcon({ page }: { page: Page }) {
 export default function Dashboard() {
   const [page, setPage] = useState<Page>("overview");
   const [snapshot, setSnapshot] = useState(EMPTY);
+  const [readProblem, setReadProblem] = useState<string | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [connected, setConnected] = useState(false);
   const [backendReachable, setBackendReachable] = useState(false);
@@ -119,22 +123,9 @@ export default function Dashboard() {
   const [pickedId, setPickedId] = useState<string | null>(null);
   const pickedRef = useRef<string | null>(null);
   const shownRef = useRef<string | null>(null);
-  const refreshRef = useRef<() => Promise<void>>(async () => {});
-  pickedRef.current = pickedId;
+  const showProjectRef = useRef<(id: string | null) => void>(() => {});
   const shownId = pickedId ?? projects[0]?.id ?? null;
   shownRef.current = shownId;
-
-  // The picked project lives in ?project=, so reload and Back keep it.
-  useEffect(() => {
-    const sync = () => setPickedId(projectFromSearch(window.location.search));
-    sync();
-    window.addEventListener("popstate", sync);
-    return () => window.removeEventListener("popstate", sync);
-  }, []);
-
-  useEffect(() => {
-    void refreshRef.current();
-  }, [pickedId]);
 
   // The page lives in the address hash, so reload and Back keep the developer where they were.
   useEffect(() => {
@@ -156,39 +147,65 @@ export default function Dashboard() {
     let socket: WebSocket | undefined;
     let retry: ReturnType<typeof setTimeout>;
     let disposed = false;
-    const refresh = async (): Promise<void> => {
-      const picked = pickedRef.current;
-      try {
+    // The backend sends one frame per new audit row, so a burst coalesces into one fetch in flight and one after it.
+    const snapshotQueue = createRefreshQueue({
+      fetch: async (): Promise<
+        { missing: true } | { missing: false; state: DashboardSnapshot | null; problem: string | null }
+      > => {
+        const picked = pickedRef.current;
         const response = await fetch(`${API_ORIGIN}/api/dashboard/state${projectQuery(picked)}`, { cache: "no-store" });
-        if (response.status === 404 && picked) {
+        if (response.status === 404 && picked) return { missing: true };
+        // The log exists but cannot be read: say why rather than show empty lists that look like nothing needs you.
+        const problem = response.status === 503 ? auditReadProblem(503, await response.json().catch(() => null)) : null;
+        if (!response.ok && problem === null) throw new Error("Dashboard API unavailable");
+        const state = problem === null ? ((await response.json()) as DashboardSnapshot) : null;
+        return { missing: false, state, problem };
+      },
+      apply: (result) => {
+        if (result.missing) {
           // A bookmark to a project this backend no longer watches opens the first one.
           window.history.replaceState(null, "", window.location.pathname + window.location.hash);
-          pickedRef.current = null;
-          setPickedId(null);
+          showProject(null);
           return;
         }
-        if (!response.ok) throw new Error("Dashboard API unavailable");
-        const state = (await response.json()) as DashboardSnapshot;
-        const status = await fetch(`${API_ORIGIN}/api/health`, { cache: "no-store" })
-          .then((r) => r.json() as Promise<Health>)
-          .catch(() => null);
-        const list = await fetch(`${API_ORIGIN}/api/projects`, { cache: "no-store" })
-          .then((r) => (r.ok ? (r.json() as Promise<{ projects: ProjectSummary[] }>) : { projects: [] }))
-          .catch(() => ({ projects: [] }));
-        // An answer for a project the developer has since switched away from is dropped.
-        if (!disposed && pickedRef.current === picked) {
-          setProjects(list.projects);
-          setSnapshot(state);
-          setHealth(status);
-          setBackendReachable(true);
-          setNow(Date.now());
-        }
-      } catch {
-        if (!disposed) setBackendReachable(false);
-      } finally {
-        if (!disposed) setChecked(true);
-      }
+        if (result.state) setSnapshot(result.state);
+        setReadProblem(result.problem);
+        setBackendReachable(true);
+        setNow(Date.now());
+      },
+      onError: () => setBackendReachable(false),
+      onSettled: () => setChecked(true),
+    });
+    // Health and the project list change rarely, so they load on start, on (re)connect, on a project switch and every 30 s.
+    const metaQueue = createRefreshQueue({
+      fetch: () =>
+        Promise.all([
+          fetch(`${API_ORIGIN}/api/health`, { cache: "no-store" })
+            .then((r) => r.json() as Promise<Health>)
+            .catch(() => null),
+          fetch(`${API_ORIGIN}/api/projects`, { cache: "no-store" })
+            .then((r) => (r.ok ? (r.json() as Promise<{ projects: ProjectSummary[] }>) : { projects: [] }))
+            .catch(() => ({ projects: [] })),
+        ]),
+      apply: ([status, list]) => {
+        setHealth(status);
+        setProjects(list.projects);
+      },
+    });
+    const showProject = (id: string | null) => {
+      if (id === pickedRef.current) return;
+      pickedRef.current = id;
+      setPickedId(id);
+      snapshotQueue.invalidate();
+      metaQueue.trigger();
     };
+    showProjectRef.current = showProject;
+    // The picked project lives in ?project=, so reload and Back keep it, and reading it first makes the first fetch ask for it.
+    pickedRef.current = projectFromSearch(window.location.search);
+    setPickedId(pickedRef.current);
+    const syncProject = () => showProject(projectFromSearch(window.location.search));
+    window.addEventListener("popstate", syncProject);
+    const metaTimer = setInterval(() => metaQueue.trigger(), 30_000);
     const connect = () => {
       if (disposed) return;
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -200,7 +217,8 @@ export default function Dashboard() {
         socket.onopen = () => {
           if (!disposed) {
             setConnected(true);
-            void refresh();
+            snapshotQueue.trigger();
+            metaQueue.trigger();
           }
         };
         socket.onmessage = (message) => {
@@ -210,7 +228,7 @@ export default function Dashboard() {
               ["agent_tool_executing", "agent_tool_completed", "agent_session_updated"].includes(event.type) &&
               isForProject(event, shownRef.current)
             )
-              void refresh();
+              snapshotQueue.trigger();
           } catch {
             /* Ignore malformed telemetry frames. */
           }
@@ -219,7 +237,7 @@ export default function Dashboard() {
           if (!disposed) {
             setConnected(false);
             // A closed socket usually means the backend stopped; the failed fetch is what shows the offline banner.
-            void refresh();
+            snapshotQueue.trigger();
             retry = setTimeout(connect, 2000);
           }
         };
@@ -228,12 +246,16 @@ export default function Dashboard() {
         if (!disposed) retry = setTimeout(connect, 2000);
       }
     };
-    refreshRef.current = refresh;
-    void refresh();
+    snapshotQueue.trigger();
+    metaQueue.trigger();
     connect();
     return () => {
       disposed = true;
+      snapshotQueue.dispose();
+      metaQueue.dispose();
       clearTimeout(retry);
+      clearInterval(metaTimer);
+      window.removeEventListener("popstate", syncProject);
       socket?.close();
     };
   }, []);
@@ -256,10 +278,11 @@ export default function Dashboard() {
     url.searchParams.set("project", id);
     window.history.pushState(null, "", url);
     setSnapshot(EMPTY);
-    setPickedId(id);
+    setReadProblem(null);
+    showProjectRef.current(id);
   }
 
-  const open = approvalRequests(snapshot.events, now).open;
+  const open = approvalRequests(snapshot, now).open;
   const shownProject = projects.find((project) => project.id === shownId) ?? null;
 
   return (
@@ -356,7 +379,16 @@ export default function Dashboard() {
               </span>
             </div>
           )}
-          {backendReachable && snapshot.source && !snapshot.source.available && page !== "project" && (
+          {backendReachable && readProblem && (
+            <div className="panel notice-panel" role="alert">
+              <strong>Can&apos;t read the audit log: {readProblem}</strong>
+              <p>
+                The backend reads <code>{snapshot.source?.databasePath ?? ".ctrlplane/audit.db"}</code> and retries on
+                its own. Your agents are still supervised: rules run in the CLI, not in this page.
+              </p>
+            </div>
+          )}
+          {backendReachable && !readProblem && snapshot.source && !snapshot.source.available && page !== "project" && (
             <div className="panel notice-panel" role="status">
               <strong>No audit log found</strong>
               <p>
@@ -366,7 +398,7 @@ export default function Dashboard() {
               </p>
             </div>
           )}
-          {page === "overview" && (
+          {page === "overview" && !readProblem && (
             <Overview
               snapshot={snapshot}
               connected={connected}
@@ -375,9 +407,11 @@ export default function Dashboard() {
               onCopy={copy}
             />
           )}
-          {page === "waiting" && <Waiting snapshot={snapshot} now={now} />}
-          {page === "sessions" && <Sessions snapshot={snapshot} now={now} apiOrigin={API_ORIGIN} projectId={shownId} />}
-          {page === "rules" && <Rules snapshot={snapshot} onCopy={copy} />}
+          {page === "waiting" && !readProblem && <Waiting snapshot={snapshot} now={now} />}
+          {page === "sessions" && !readProblem && (
+            <Sessions key={shownId ?? ""} snapshot={snapshot} now={now} apiOrigin={API_ORIGIN} projectId={shownId} />
+          )}
+          {page === "rules" && !readProblem && <Rules snapshot={snapshot} onCopy={copy} />}
           {/* Stays mounted so a running plan or Codex explanation keeps its answer across page switches. */}
           <div hidden={page !== "plan"}>
             <PlanReview

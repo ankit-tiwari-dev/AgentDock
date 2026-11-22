@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import { request } from "node:http";
 import { AgentDockBackendServer, parseDevOrigin } from "../src/server.ts";
 
-function call(port: number, method: string, path: string, origin: string, body?: string) {
+function call(port: number, method: string, path: string, origin: string, body?: string, site?: string) {
   return new Promise<{ status: number; allow: unknown }>((resolve, reject) => {
     const headers: Record<string, string> = { Origin: origin };
+    if (site !== undefined) headers["Sec-Fetch-Site"] = site;
     if (body !== undefined) headers["Content-Type"] = "application/json";
     if (method === "OPTIONS") headers["Access-Control-Request-Method"] = "POST";
     const req = request({ host: "127.0.0.1", port, method, path, headers }, (res) => {
@@ -49,6 +50,18 @@ test("the named dev origin may call the API and read the answer; no other origin
     const other = await call(port, "POST", "/api/supervisor/interview", "http://localhost:3001", interview);
     assert.equal(other.status, 403);
     assert.equal(other.allow, undefined);
+  });
+});
+
+test("regression: the named dev server may GET across sites, another local port may not", async () => {
+  await withServer("http://localhost:3000", async (port) => {
+    const dev = await call(port, "GET", "/api/health", "http://localhost:3000", undefined, "same-site");
+    assert.equal(dev.status, 200);
+    assert.equal(dev.allow, "http://localhost:3000");
+    const devByIp = await call(port, "GET", "/api/health", "http://localhost:3000", undefined, "cross-site");
+    assert.equal(devByIp.status, 200);
+    const other = await call(port, "GET", "/api/health", "http://localhost:3001", undefined, "same-site");
+    assert.equal(other.status, 403);
   });
 });
 

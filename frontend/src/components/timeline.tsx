@@ -47,9 +47,6 @@ export function Timeline({
                 className={hit ? "pg-tl-row pg-hit" : "pg-tl-row"}
                 aria-current={hit ? "true" : undefined}
                 onClick={() => (onPick ? onPick(event) : setSelected(event))}
-                aria-label={`${day ? `${day} ` : ""}${clock(event.timestamp)} ${what} ${target}, ${chip.label}. ${
-                  onPick ? "Open this session at this event" : "Open details"
-                }`}
               >
                 <time className="ov-mono" dateTime={new Date(event.timestamp).toISOString()}>
                   {day && <span className="pg-tl-date">{day}</span>}
@@ -75,6 +72,8 @@ export function Timeline({
                     </small>
                   )}
                 </span>
+                {/* The visible text names the row (WCAG 2.5.3); the action follows it for a screen reader. */}
+                <span className="sr-only">. {onPick ? "Open this session at this event" : "Open details"}</span>
               </button>
             </li>
           );

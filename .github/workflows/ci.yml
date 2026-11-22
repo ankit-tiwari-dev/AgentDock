@@ -63,6 +63,40 @@ jobs:
       - run: npm ci
       - run: npm test
 
+  constraints:
+    name: CONSTRAINTS.md (floor, coverage, architecture, pages)
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The floor and changed-line coverage diff against the merge base with main.
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run check:floor
+      - run: npm run check:coverage
+      - run: npm run check:arch
+      - name: check out agentdock-cli for the copied-file check
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ankit-tiwari-dev/agentdock-cli
+          ref: main
+          path: agentdock-cli
+          persist-credentials: false
+      - run: npm run check:cli-copies -- --cli agentdock-cli
+      - name: build the dashboard for the page check
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+      # Lighthouse finds the Chrome that ubuntu-latest ships with.
+      - run: npm run check:pages
+
   docker:
     name: docker image (build and smoke test)
     needs: checks

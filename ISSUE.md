@@ -89,11 +89,12 @@ Status flow: FOUND → IN PROGRESS → FIXED. Each entry: symptoms, root cause, 
 - **Root cause:** only the daemon writes `audit.db`; the hook's local fallback records nothing.
 - **Fix:** in agentdock-cli (its ISSUE.md → I-55): with no daemon running, the hook writes the call to `audit.db` itself, as the daemon would. Nothing changes here; the dashboard reads those rows like any other. It needs an agentdock-cli version with that fix.
 
-## I-14 · FOUND · The dashboard loads its fonts from Google
+## I-14 · FIXED · The dashboard loads its fonts from Google
 
-- **Symptoms:** opening the dashboard requests `fonts.googleapis.com` and `fonts.gstatic.com`, which tells Google the dashboard is open, and the CSP has to allow both hosts.
+- **Symptoms:** opening the dashboard requests `fonts.googleapis.com` and `fonts.gstatic.com`, which tells Google the dashboard is open, and the CSP has to allow both hosts. Lighthouse measured the request as render-blocking (about 350 ms) on every page.
 - **Root cause:** `frontend/src/app/styles.css` starts with a Google Fonts `@import`.
-- **Fix (proposed):** bundle the fonts at build time (`next/font`) or use system fonts, then drop the two hosts from the CSP.
+- **Fix:** the latin Inter (400–700) and JetBrains Mono (400, 500) woff2 files from `@fontsource` 5.3.0 are committed under `frontend/src/app/fonts/` with their OFL licence and loaded by `@font-face` with `font-display: swap`; the CSP's `style-src` and `font-src` are `'self'` only.
+- **Verification:** `regression:` tests in `backend/tests/static-serving.test.ts` and `frontend/tests/assets.test.ts`; Lighthouse shows no render-blocking third-party request.
 
 ## I-15 · FIXED · Every Dependabot pull request failed its checks
 
@@ -107,3 +108,101 @@ Status flow: FOUND → IN PROGRESS → FIXED. Each entry: symptoms, root cause, 
 - **Symptoms:** a moderate alert for `minimatch` 10.2.6. A crafted glob pattern can make matching take very long.
 - **Root cause:** `eslint`, `@eslint/config-array` and `@typescript-eslint/typescript-estree` require `minimatch ^10`, even in their latest releases; the fix is in 11.0.1. It is a development dependency only: it runs inside the linter, on glob patterns this repo writes, and is not part of what ships.
 - **Fix (waiting):** none yet. It clears when those packages move to minimatch 11, and Dependabot will propose that update. Forcing 11 with an npm `overrides` entry would run the linters on a major version they were not tested with. The alert stays open rather than dismissed, so it is not forgotten.
+
+## I-17 · FIXED · `AGENTDOCK_HOST=0.0.0.0` outside Docker put the API on the network
+
+- **Symptoms:** a request to the machine's LAN address with `Host: 127.0.0.1:<port>` returned the full audit log, and POSTs without an `Origin` started supervisor runs and wrote settings.
+- **Root cause:** `parseListenAddress` in `backend/src/server.ts` accepted the wildcard addresses anywhere, and the `Host` check only stops browsers.
+- **Fix:** `0.0.0.0` and `::` need `AGENTDOCK_IN_CONTAINER=1`, which the Dockerfile sets; otherwise the backend does not start. Outside a container a connection from anything but loopback is closed.
+- **Verification:** `backend/tests/listen-address.test.ts`. `npm run docker:smoke` was not run locally.
+
+## I-18 · FIXED · A waiting approval dropped out of "Needs you" after 500 newer events
+
+- **Symptoms:** one `REQUIRE_MANUAL_APPROVAL` followed by 500 other calls showed nothing waiting, while the all-time count said 1.
+- **Root cause:** the Overview card, the sidebar count and Waiting on you were worked out in the browser from the snapshot's newest 500 events (`SNAPSHOT_LIMIT` in `backend/src/audit-reader.ts`).
+- **Fix:** `snapshot()` reads the 15-minute window with its own query into `approvals: { windowMs, events }`; `APPROVAL_WINDOW_MS` now lives in `audit-reader.ts` and reaches the browser as `approvals.windowMs`.
+- **Verification:** `regression:` tests in `backend/tests/audit-reader.test.ts` and `frontend/tests/pages.test.ts`.
+
+## I-19 · FIXED · An empty or relative `CTRLPLANE_HOME` let the project choose the supervisor and where the key goes
+
+- **Symptoms:** with `CTRLPLANE_HOME` set to `""` or `.ctrlplane`, an agent-written `supervisor.json` turned the supervisor on and the saved key was sent to a URL the agent chose.
+- **Root cause:** `backend/src/provider-resolver.ts` and the copied `supervisor-config.ts` used `??`, and nothing refused a relative path.
+- **Fix:** `supervisorHome()` treats empty as `~/.ctrlplane` and refuses a relative home or one inside a `--project` folder (`CONFIG_INVALID`); `supervisor-config.ts` is synced from agentdock-cli.
+- **Verification:** `backend/tests/supervisor-relative-home.test.ts`.
+
+## I-20 · FIXED · A cross-site GET could spend the saved key
+
+- **Symptoms:** a web page's no-cors `GET /api/supervisor/models` made the backend read the key and call the provider with it; each GET of `/api/supervisor/settings` read the keychain twice.
+- **Root cause:** the `Origin` check in `backend/src/server.ts` ran only on POST.
+- **Fix:** one gate for every method and the WebSocket upgrade: a foreign `Origin`, or `Sec-Fetch-Site` of `cross-site` or `same-site`, gets 403; a page navigation to a non-API path still opens the dashboard; the dev origin still passes.
+- **Verification:** `backend/tests/cross-site-get.test.ts`.
+
+## I-21 · FIXED · An unreadable audit log showed as an empty, safe-looking dashboard
+
+- **Symptoms:** with a required column missing, `GET /api/dashboard/state` answered 200 with no events; with the file locked the page said "No audit log found".
+- **Root cause:** `snapshot()` in `backend/src/audit-reader.ts` used `query()`, which swallows SQL errors.
+- **Fix:** the events, sessions and counts queries are strict and the route answers 503 `DB_UNAVAILABLE` or `SCHEMA_MISMATCH`; the page shows "Can't read the audit log". An older log without `rule_id` or `session_usage` still loads.
+- **Verification:** `regression:` tests in `backend/tests/dashboard-api.test.ts` and `frontend/tests/events.test.ts`.
+
+## I-22 · FIXED · `developerAnswers: {}` locked a spec with an API supervisor
+
+- **Symptoms:** with a model provider the empty answers went out as a finalize request and a locked specification came back; with the supervisor off the same body asked questions.
+- **Root cause:** `backend/src/server.ts` chose finalize for any truthy `developerAnswers`; the built-in interview treated `{}` as no answers.
+- **Fix:** one `interviewMode()` in `supervisor-provider.ts`, used by every provider and the built-in interview, needs a non-blank answer; a body whose answers are not strings gets 400; the dashboard and the extension no longer send `{}`.
+- **Verification:** `backend/tests/supervisor-interview-mode.test.ts`.
+
+## I-23 · FIXED · Three routes no client called, one of them pushing frames to every dashboard
+
+- **Symptoms:** `POST /api/events/broadcast` let any local process push WebSocket frames to open dashboards; `/api/supervisor/loop-check` and `/api/cost/calculate` were used only by tests.
+- **Root cause:** left over from earlier designs in `backend/src/server.ts`.
+- **Fix:** the routes, the WebSocket message types no one read, `checkTrajectoryForLoops` and `backend/src/token-pricing.ts` are deleted. The removed assertions are `CONSTRAINTS.md` exception E1.
+- **Verification:** `regression: the routes no client called answer 404` (`backend/tests/security.test.ts`).
+
+## I-24 · FIXED · The extension offered a key box whose keys nothing read
+
+- **Symptoms:** the sidebar stored a key in VS Code SecretStorage and said "saved to the OS keychain"; the backend reads keys only from the keychain, through the CLI.
+- **Root cause:** `extension/src/sidebar-provider.ts` and `secret-manager.ts` predate D-9 and agentdock-cli D-13.
+- **Fix:** the key box, its message and `secret-manager.ts` are removed; the sidebar points to `ctrlplane supervisor set-key`. The extension still cannot load (I-6), so no key was ever stored.
+- **Verification:** two `regression:` tests in `extension/tests/extension.test.ts`.
+
+## I-25 · FIXED · The copied `token-pricing.ts` kept a quadratic regex the CLI had fixed
+
+- **Symptoms:** `backend/src/token-pricing.ts` still had `.replace(/@.*$/, "")` after agentdock-cli replaced it (4d20642), reachable through `/api/cost/calculate` with a model name of up to 1 MB.
+- **Root cause:** files copied from agentdock-cli were updated by hand when someone remembered.
+- **Fix:** `scripts/cli-copies.ts` lists every copy, fails when one differs from agentdock-cli `main`, and `--sync` is the only way to update them. The file itself was later deleted with its route (I-23).
+- **Verification:** `scripts/tests/cli-copies.test.ts`; `npm run check:cli-copies` in CI.
+
+## I-26 · FIXED · Every new audit row started its own three-request refresh
+
+- **Symptoms:** a burst of N audit rows started N overlapping refreshes, each fetching the state, then `/api/health`, then `/api/projects`, one after the other; an older answer could land after a newer one and replace it.
+- **Root cause:** `frontend/src/components/dashboard.tsx` called `refresh()` for every WebSocket frame, and the backend sends one frame per row.
+- **Fix:** `frontend/src/lib/refresh-queue.ts` runs one refresh at a time, coalesces every trigger during it into one more, and drops an answer older than the last one applied. Health and projects are fetched together on mount, on socket open, on a project switch and every 30 s. The first fetch already knows `?project=`.
+- **Verification:** `frontend/tests/refresh-queue.test.ts` (51 triggers make 2 fetches; a stale answer is dropped).
+
+## I-27 · FIXED · Pages redid work over every event on each tick
+
+- **Symptoms:** Sessions filtered and sorted all events once per session, and "Ran afterwards" scanned all events for each request (O(n²)), on every 10 s tick and every refresh; the Overview's 1 s clock re-rendered every stream row.
+- **Root cause:** derived data computed inside render, with no index, in `frontend/src/components/sessions.tsx`, `overview.tsx`, `waiting.tsx`, `rules.tsx` and `frontend/src/lib/events.ts`.
+- **Fix:** `ranAfterwardsIndex()` reads each event's target once and answers by binary search; `sessionSummaries()` groups events once per snapshot; the clock lives in a small `<Ago>` component; derived lists are memoized on the snapshot, and a timeout moves a request out of "Needs you" when its 15 minutes end.
+- **Verification:** `frontend/tests/derived.test.ts` checks the index against the old implementation on 400 random event sequences.
+
+## I-28 · FIXED · Pages moved as the first snapshot arrived, and card names did not match their text
+
+- **Symptoms:** Lighthouse measured layout shift above 0.1 on Overview (0.157), Rules (0.290) and Waiting on you (0.246), and a serious `label-content-name-mismatch` on Overview, Rules and Sessions: a card showing "Blocked 54" was named "Blocked: 54. Show blocked calls".
+- **Root cause:** pages rendered their empty states before the first snapshot and replaced them when it arrived; buttons carried an `aria-label` that did not start with their visible text.
+- **Fix:** pages show one loading box until the first snapshot (`snapshotLoaded()` in `frontend/src/components/page-parts.tsx`); buttons take their name from their visible text, with any hint after it. Long lists use `content-visibility: auto`. Worst desktop CLS is now 0.094 and no page fails a serious or critical audit; the `CONSTRAINTS.md` budgets are tightened to match.
+- **Verification:** `frontend/tests/accessibility.test.ts`; `npm run check:pages`.
+
+## I-29 · FIXED · Small page faults: no icon, hashed files not cached, Settings refetching
+
+- **Symptoms:** every page logged a 404 for `/favicon.ico`. Hashed files under `/_next/static/` were served `no-cache`. Settings refetched the provider's model list after every save, and asked for it with no saved key, which the backend answers with 503.
+- **Root cause:** no icon in the app; one `Cache-Control` value for every static file (`backend/src/server.ts`); the models effect in `frontend/src/components/settings.tsx` depended on the whole settings object.
+- **Fix:** `frontend/src/app/icon.svg`; `public, max-age=31536000, immutable` for `/_next/static/` only; `modelListFor()` in `frontend/src/lib/settings.ts` decides from the picked provider and its key.
+- **Verification:** `regression:` tests in `backend/tests/static-serving.test.ts`, `frontend/tests/assets.test.ts` and `frontend/tests/settings.test.ts`.
+
+## I-30 · FIXED · The image shipped six known OpenSSL and zlib vulnerabilities
+
+- **Symptoms:** `osv-scanner scan image` on the built image reported 6 known vulnerabilities (1 critical, 4 high, 1 medium) in Alpine's `openssl` 3.5.9-r0 and `zlib` 1.3.2-r1, all with fixes available.
+- **Root cause:** the digest-pinned `node:24-alpine` base in `Dockerfile` predates the Alpine fixes, and the newest `node:24-alpine` digest was the same one, so a digest update could not help. The lockfile scan in `security.yml` reads only `package-lock.json` and never saw the image's OS packages.
+- **Fix:** the runtime stage runs `apk upgrade --no-cache`, and the release workflow scans the image before publishing it (D-14).
+- **Verification:** after the change, `osv-scanner scan image --config osv-scanner.toml` on the built image: "No issues found"; `npm run docker:smoke` passed.
