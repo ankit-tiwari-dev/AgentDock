@@ -48,46 +48,6 @@ test("SupervisorService locks specification and criteria in Phase 2", () => {
   assert.ok(res.lockedSpecification.instructionsForAgent2.includes("Do not alter existing tests"));
 });
 
-test("SupervisorService detects infinite debugging loops in trajectory", () => {
-  const service = new SupervisorService();
-
-  // Healthy trajectory (passes or single failure)
-  const healthy = service.checkTrajectoryForLoops({
-    sessionId: "sess_1",
-    recentTools: [
-      { toolName: "Bash", input: "npm test", exitCode: 1, error: "Syntax error" },
-      { toolName: "Bash", input: "npm test", exitCode: 0 },
-    ],
-  });
-  assert.equal(healthy.loopDetected, false);
-  assert.equal(healthy.recommendation, "CONTINUE");
-
-  // Warning threshold (2 consecutive failures)
-  const warn = service.checkTrajectoryForLoops({
-    sessionId: "sess_2",
-    recentTools: [
-      { toolName: "Bash", input: "npm test", exitCode: 1, error: "Syntax error" },
-      { toolName: "Bash", input: "npm test", exitCode: 1, error: "Syntax error" },
-    ],
-  });
-  assert.equal(warn.loopDetected, false);
-  assert.equal(warn.recommendation, "WARN_AGENT");
-
-  // Loop threshold (3 consecutive failures -> HALT)
-  const loop = service.checkTrajectoryForLoops({
-    sessionId: "sess_3",
-    recentTools: [
-      { toolName: "Bash", input: "npm test", exitCode: 1, error: "Syntax error" },
-      { toolName: "Bash", input: "npm test", exitCode: 1, error: "Syntax error" },
-      { toolName: "Bash", input: "npm test", exitCode: 1, error: "Syntax error" },
-    ],
-  });
-  assert.equal(loop.loopDetected, true);
-  assert.equal(loop.recommendation, "HALT_FOR_DEVELOPER");
-  assert.equal(loop.consecutiveFailureCount, 3);
-  assert.ok(loop.message.includes("stuck in an execution loop"));
-});
-
 test("WebSocketBroadcaster manages clients and encodes valid RFC6455 frames", () => {
   const broadcaster = new WebSocketBroadcaster();
   assert.equal(broadcaster.getConnectedClientsCount(), 0);
@@ -157,23 +117,4 @@ test("regression: the removed prompt coach route answers 404", () => {
   const pair = createMockHttpPair({ method: "POST", url: "/api/coach/analyze", body: { prompt: "fix it" } });
   server.handleHttpRequest(pair.req, pair.res);
   assert.equal(pair.getStatusCode(), 404);
-});
-
-test("AgentDockBackendServer handles the Cost route", () => {
-  const server = new AgentDockBackendServer();
-
-  // Test Cost route logic
-  const costPair = createMockHttpPair({
-    method: "POST",
-    url: "/api/cost/calculate",
-    body: { modelName: "claude-3-5-sonnet", inputTokens: 10000, outputTokens: 2000 },
-  });
-
-  server.handleHttpRequest(costPair.req, costPair.res);
-
-  assert.equal(costPair.getStatusCode(), 200);
-  const costData = costPair.getJson<{ totalTokens: number; costUsd: number; formattedCost: string }>();
-  assert.equal(costData.totalTokens, 12000);
-  assert.equal(costData.costUsd, 0.06);
-  assert.equal(costData.formattedCost, "$0.0600");
 });

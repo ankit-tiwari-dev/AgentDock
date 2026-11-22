@@ -3,7 +3,6 @@ import type { Socket } from "node:net";
 import { join, resolve } from "node:path";
 import { WebSocketBroadcaster } from "./websocket-server.ts";
 import { SupervisorService } from "./supervisor-service.ts";
-import { calculateTurnCost } from "./token-pricing.ts";
 import { AuditReadError, type AuditReader, type DashboardEvent } from "./audit-reader.ts";
 import { parseSearchQuery, parseTimelineQuery } from "./event-query.ts";
 import { contentSecurityPolicy, contentType, decodePath, findExportFile } from "./static-files.ts";
@@ -15,7 +14,7 @@ import { isInContainer, resolveSupervisor, supervisorHome, type ResolvedSupervis
 import { stdoutLogSink } from "./run-log.ts";
 import { ERROR_MESSAGES, SupervisorError, type ProviderName, type RunMode } from "./supervisor-provider.ts";
 import { runSupervisor } from "./supervisor-runner.ts";
-import type { SupervisorInterviewRequest, TrajectoryLoopCheckRequest, WSEventMessage } from "./types.ts";
+import type { SupervisorInterviewRequest, WSEventMessage } from "./types.ts";
 import type { ReviewResult, SupervisorResult } from "./supervisor-schemas.ts";
 
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -388,31 +387,13 @@ export class AgentDockBackendServer {
           return;
         }
 
-        const announce = (result: {
-          isRefined: boolean;
-          lockedSpecification?: { title: string; specHash: string; acceptanceCriteria: string[] };
-        }) => {
-          if (result.isRefined && result.lockedSpecification) {
-            this.broadcaster.broadcast({
-              type: "spec_updated",
-              sessionId: "active_session",
-              timestamp: Date.now(),
-              data: {
-                title: result.lockedSpecification.title,
-                specHash: result.lockedSpecification.specHash,
-                criteriaCount: result.lockedSpecification.acceptanceCriteria.length,
-              },
-            });
-          }
-          this.sendJson(res, 200, result);
-        };
         const resolved = this.resolveSupervisor();
         if (resolved.state === "off") {
-          announce(this.supervisor.conductInterview(body));
+          this.sendJson(res, 200, this.supervisor.conductInterview(body));
           return;
         }
         const mode: RunMode = body.developerAnswers ? "finalize" : "questions";
-        this.runLocked(res, resolved, mode, project!, body, (result) => announce(result as SupervisorResult));
+        this.runLocked(res, resolved, mode, project!, body, (result) => this.sendJson(res, 200, result));
       });
       return;
     }
@@ -424,64 +405,6 @@ export class AgentDockBackendServer {
         return;
       }
       this.runLocked(res, resolved, "review", project!, undefined, (result) => this.sendJson(res, 200, result));
-      return;
-    }
-
-    // 4. Trajectory Loop Check Endpoint
-    if (req.method === "POST" && pathname === "/api/supervisor/loop-check") {
-      this.readJsonBody<TrajectoryLoopCheckRequest>(req, res, (body) => {
-        if (!body || !Array.isArray(body.recentTools)) {
-          this.sendJson(res, 400, { error: "Missing required 'recentTools' array" });
-          return;
-        }
-
-        const loopResult = this.supervisor.checkTrajectoryForLoops(body);
-
-        // If loop detected, broadcast alert
-        if (loopResult.loopDetected) {
-          this.broadcaster.broadcast({
-            type: "circuit_breaker_alert",
-            sessionId: body.sessionId || "unknown",
-            timestamp: Date.now(),
-            data: {
-              consecutiveFailures: loopResult.consecutiveFailureCount,
-              message: loopResult.message,
-            },
-          });
-        }
-
-        this.sendJson(res, 200, loopResult);
-      });
-      return;
-    }
-
-    // 5. Ingest and Broadcast Telemetry Event
-    if (req.method === "POST" && pathname === "/api/events/broadcast") {
-      this.readJsonBody<WSEventMessage>(req, res, (event) => {
-        if (!event || !event.type) {
-          this.sendJson(res, 400, { error: "Invalid event payload" });
-          return;
-        }
-
-        this.broadcaster.broadcast(event);
-        this.sendJson(res, 200, { success: true, broadcastedTo: this.broadcaster.getConnectedClientsCount() });
-      });
-      return;
-    }
-
-    // 7. Token Cost Calculator Endpoint
-    if (req.method === "POST" && pathname === "/api/cost/calculate") {
-      this.readJsonBody<{ modelName?: string; inputTokens?: number; outputTokens?: number }>(req, res, (body) => {
-        this.sendJson(
-          res,
-          200,
-          calculateTurnCost({
-            modelName: body?.modelName,
-            inputTokens: body?.inputTokens,
-            outputTokens: body?.outputTokens,
-          }),
-        );
-      });
       return;
     }
 
