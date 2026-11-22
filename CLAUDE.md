@@ -10,6 +10,7 @@
 
 ## Run everything through make
 
+- Read `CONSTRAINTS.md` before writing code. Do not weaken it to make a change pass. `make constraints` runs its checks; the hooks in `.claude/settings.json` run them after each edit and at task end.
 - Run every gate from the repo root through `make`: `make ci` (lint, typecheck, build, hygiene, test, in CI's order), or one of `make lint`, `make typecheck`, `make build`, `make hygiene`, `make test`. `make format` fixes Prettier.
 - Read the real exit code: `make ci > ci.log 2>&1; echo "make ci rc=$?"`. NEVER pipe `make` into `tail`, `head` or `grep` and read that as pass or fail. Only `rc=0` is green. Delete `ci.log` afterwards; `hygiene` fails on `*.log`.
 - NEVER say a change is done without a green `make ci` and its test counts.
