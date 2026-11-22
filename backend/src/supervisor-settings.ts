@@ -29,7 +29,8 @@ export interface SettingsView {
 }
 
 export interface SettingsDeps {
-  home: string;
+  /** null when supervisorHome() refused the folder, so nothing is read from or written to it. */
+  home: string | null;
   env: Record<string, string | undefined>;
   keychain?: Omit<KeyReadOptions, "inContainer">;
   anthropicBaseUrl?: string;
@@ -49,6 +50,8 @@ const DOCKER_REASON =
   "Read-only container. Change the supervisor with ctrlplane supervisor on the host. API providers need the host keychain, so they do not run in Docker.";
 const HOST_REASON =
   "The backend cannot write the settings file. Change the supervisor with ctrlplane supervisor in a terminal.";
+const HOME_REASON =
+  "CTRLPLANE_HOME is relative or inside a project, so the supervisor stays off. Set it to a full path outside your projects.";
 const NOT_CONFIGURED = "Turn the supervisor on first in a terminal: ctrlplane supervisor use <provider> <model>";
 
 const MESSAGES: Record<Exclude<SettingsCode, "READ_ONLY">, string> = {
@@ -65,12 +68,13 @@ const fail = (status: number, code: Exclude<SettingsCode, "READ_ONLY">) => ({
   body: { error: MESSAGES[code], code },
 });
 
-const filePath = (deps: SettingsDeps) => supervisorFilePath({ CTRLPLANE_HOME: deps.home });
+const filePath = (home: string) => supervisorFilePath({ CTRLPLANE_HOME: home });
 
 /** Why a save cannot work here, or null when it can. */
 function writeProblem(deps: SettingsDeps): string | null {
   if (isInContainer(deps.env)) return DOCKER_REASON;
-  const path = filePath(deps);
+  if (deps.home === null) return HOME_REASON;
+  const path = filePath(deps.home);
   if (!existsSync(path)) return NOT_CONFIGURED;
   try {
     accessSync(dirname(path), constants.W_OK);
@@ -119,7 +123,8 @@ export async function applySettingsChange(
   const modelOk = typeof model === "string" ? checkModel(model) : provider === "codex" && model === null;
   if (!modelOk) return fail(400, "INVALID_MODEL");
   if (isInContainer(deps.env)) return { status: 503, body: { error: DOCKER_REASON, code: "READ_ONLY" } };
-  const path = filePath(deps);
+  if (deps.home === null) return { status: 503, body: { error: HOME_REASON, code: "READ_ONLY" } };
+  const path = filePath(deps.home);
   if (!existsSync(path)) return fail(409, "NOT_CONFIGURED");
   const resolved = resolve(deps);
   // An unreadable file has no base URL to keep; the dashboard may still replace it with provider and model.
