@@ -139,3 +139,19 @@ A seventh page, Settings, was added later (D-9).
 - Two weeks of warnings let numbers measured on one Windows machine be checked against CI before they cost a red build.
 
 **Rules out:** loosening a number, or adding an exception, in the same change that needed it, without saying so in the PR. dependency-cruiser and Lighthouse are root dev dependencies only; `backend/` still has no new dependency (D-10), and the architecture check now enforces that.
+
+## D-13 · Every request passes the browser gate, and the wildcard address is for the container only
+
+**Decision:** this amends D-2 and D-4.
+
+- **D-2:** the `Origin` check runs on every method and on the WebSocket upgrade, not only on POST. A request with a foreign `Origin`, or with `Sec-Fetch-Site: cross-site` or `same-site`, gets 403. A request with neither header (curl, the extension) still passes, and so does the dev origin. A GET page navigation to a non-API path still opens the dashboard. A POST must still be `application/json`.
+- **D-4:** `AGENTDOCK_HOST` may be `0.0.0.0` or `::` only with `AGENTDOCK_IN_CONTAINER=1`, which the Dockerfile sets. Outside a container the backend refuses to start with it, and closes any connection that does not come from loopback.
+
+The approval window D-6 names now lives in `backend/src/audit-reader.ts` and reaches the browser as `approvals.windowMs`; the server reads the window's requests with its own query (ISSUE.md I-18).
+
+**Why:**
+
+- A cross-site GET cannot read the answer, but it can still make the backend read the keychain and spend the saved key on a provider call (I-20).
+- The `Host` check stops browsers, not a client on the network, so a wildcard address outside Docker served the audit log and the write routes to the LAN (I-17).
+
+**Rules out:** opening a backend route from another site's page, and running the backend on a network address outside the container image.
