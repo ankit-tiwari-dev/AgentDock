@@ -21,7 +21,7 @@ import {
   unseenEvents,
 } from "@/lib/events";
 import { ESTIMATED_PROJECT, projectCostView } from "@/lib/cost";
-import { EstimatedMark, snapshotLoaded } from "./page-parts";
+import { EstimatedMark, LoadingBox, snapshotLoaded } from "./page-parts";
 
 export const SETUP_COMMAND = "ctrlplane init --agent all";
 const STREAM_ROWS = 50;
@@ -173,133 +173,133 @@ export default function Overview({ snapshot, connected, backendReachable, checke
         <CostCard counts={snapshot.counts} loaded={loaded} />
       </section>
 
-      <div className="ov-columns">
-        <section className="ov-panel ov-stream" aria-labelledby="ov-stream-title">
-          <div className="ov-panel-head">
-            <h2 id="ov-stream-title">Live stream</h2>
-            <div className="ov-pills" role="group" aria-label="Filter by verdict">
-              <FilterPill label="All" count={counts.all} active={filter === "all"} onClick={() => setFilter("all")} />
-              <FilterPill
-                label="Blocked"
-                count={counts.blocked}
-                active={filter === "Blocked"}
-                onClick={() => setFilter("Blocked")}
-              />
-              <FilterPill
-                label="Needs approval"
-                count={counts.approval}
-                active={filter === "Needs approval"}
-                onClick={() => setFilter("Needs approval")}
-              />
-            </div>
-            <label className="ov-search">
-              <SearchIcon />
-              <span className="ov-sr">Search commands, files and rules</span>
-              <input
-                ref={searchRef}
-                type="search"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search commands, files, rules"
-              />
-            </label>
-          </div>
-
-          <div aria-live="polite">
-            {queued.length > 0 && (
-              <div className="ov-queued">
-                <button type="button" onClick={() => setFrozen(snapshot.events)}>
-                  {queued.length} new event{queued.length === 1 ? "" : "s"}. Show them
-                </button>
+      {/* Both columns grow when the first snapshot arrives; one box until then means nothing already shown moves. */}
+      {!loaded ? (
+        <LoadingBox what="the audit log" />
+      ) : (
+        <div className="ov-columns">
+          <section className="ov-panel ov-stream" aria-labelledby="ov-stream-title">
+            <div className="ov-panel-head">
+              <h2 id="ov-stream-title">Live stream</h2>
+              <div className="ov-pills" role="group" aria-label="Filter by verdict">
+                <FilterPill label="All" count={counts.all} active={filter === "all"} onClick={() => setFilter("all")} />
+                <FilterPill
+                  label="Blocked"
+                  count={counts.blocked}
+                  active={filter === "Blocked"}
+                  onClick={() => setFilter("Blocked")}
+                />
+                <FilterPill
+                  label="Needs approval"
+                  count={counts.approval}
+                  active={filter === "Needs approval"}
+                  onClick={() => setFilter("Needs approval")}
+                />
               </div>
-            )}
-          </div>
+              <label className="ov-search">
+                <SearchIcon />
+                <span className="ov-sr">Search commands, files and rules</span>
+                <input
+                  ref={searchRef}
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search commands, files, rules"
+                />
+              </label>
+            </div>
 
-          {empty ? (
-            <div className="ov-empty">
-              <h3>No agent activity yet</h3>
-              <p>Set up the hooks in your project, then start an agent. Each tool call it makes shows up here.</p>
-              <span className="ov-codeline">
-                <code>{SETUP_COMMAND}</code>
+            <div aria-live="polite">
+              {queued.length > 0 && (
+                <div className="ov-queued">
+                  <button type="button" onClick={() => setFrozen(snapshot.events)}>
+                    {queued.length} new event{queued.length === 1 ? "" : "s"}. Show them
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {empty ? (
+              <div className="ov-empty">
+                <h3>No agent activity yet</h3>
+                <p>Set up the hooks in your project, then start an agent. Each tool call it makes shows up here.</p>
+                <span className="ov-codeline">
+                  <code>{SETUP_COMMAND}</code>
+                  <button
+                    type="button"
+                    className="ov-btn ov-btn-sm"
+                    onClick={() => onCopy(SETUP_COMMAND, "Setup command")}
+                  >
+                    Copy
+                  </button>
+                </span>
+              </div>
+            ) : visible.length === 0 && shown.length > 0 ? (
+              <div className="ov-empty">
+                <h3>Nothing matches</h3>
+                <p>No events match this filter{query.trim() ? " and search" : ""}.</p>
                 <button
                   type="button"
                   className="ov-btn ov-btn-sm"
-                  onClick={() => onCopy(SETUP_COMMAND, "Setup command")}
+                  onClick={() => {
+                    setQuery("");
+                    setFilter("all");
+                  }}
                 >
-                  Copy
+                  Clear filters
                 </button>
-              </span>
-            </div>
-          ) : visible.length === 0 && shown.length > 0 ? (
-            <div className="ov-empty">
-              <h3>Nothing matches</h3>
-              <p>No events match this filter{query.trim() ? " and search" : ""}.</p>
-              <button
-                type="button"
-                className="ov-btn ov-btn-sm"
-                onClick={() => {
-                  setQuery("");
-                  setFilter("all");
-                }}
-              >
-                Clear filters
-              </button>
-            </div>
-          ) : (
-            <div className="ov-table" role="region" aria-label="Events" tabIndex={0}>
-              <div className="ov-row ov-row-head" aria-hidden="true">
-                <span>Time</span>
-                <span>Agent</span>
-                <span>Action</span>
-                <span>Verdict</span>
-                <span>Rule</span>
               </div>
-              <ul>
-                {(showAll ? visible : visible.slice(0, STREAM_ROWS)).map((event) => (
-                  <li key={event.id}>
-                    <StreamRow event={event} fresh={fresh.has(event.id)} onOpen={setSelected} />
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {visible.length > STREAM_ROWS && (
-            <div className="ov-stream-foot">
-              {showAll ? `Showing all ${visible.length}.` : `Showing the newest ${STREAM_ROWS} of ${visible.length}.`}{" "}
-              <button type="button" className="ov-link" onClick={() => setShowAll(!showAll)}>
-                {showAll ? `Show the newest ${STREAM_ROWS}` : `Show all ${visible.length}`}
-              </button>
-            </div>
-          )}
-        </section>
-
-        <div className="ov-rail">
-          <section ref={needsRef} className="ov-panel ov-needs" aria-labelledby="ov-needs-title">
-            <h2 id="ov-needs-title">Needs you</h2>
-            {!loaded ? (
-              <p className="ov-needs-text">Loading approval requests…</p>
-            ) : waiting.length ? (
-              <>
-                {waiting.slice(0, NEEDS_SHOWN).map((event) => (
-                  <ApprovalItem key={event.id} event={event} />
-                ))}
-                {waiting.length > NEEDS_SHOWN && (
-                  <a className="ov-btn ov-btn-sm" href="#waiting">
-                    {waiting.length - NEEDS_SHOWN} more waiting. See them all
-                  </a>
-                )}
-              </>
             ) : (
-              <p className="ov-needs-text">
-                Nothing is waiting for you. When an agent asks before a risky change, it shows up here with what it
-                wants and why.
-              </p>
+              <div className="ov-table" role="region" aria-label="Events" tabIndex={0}>
+                <div className="ov-row ov-row-head" aria-hidden="true">
+                  <span>Time</span>
+                  <span>Agent</span>
+                  <span>Action</span>
+                  <span>Verdict</span>
+                  <span>Rule</span>
+                </div>
+                <ul>
+                  {(showAll ? visible : visible.slice(0, STREAM_ROWS)).map((event) => (
+                    <li key={event.id}>
+                      <StreamRow event={event} fresh={fresh.has(event.id)} onOpen={setSelected} />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {visible.length > STREAM_ROWS && (
+              <div className="ov-stream-foot">
+                {showAll ? `Showing all ${visible.length}.` : `Showing the newest ${STREAM_ROWS} of ${visible.length}.`}{" "}
+                <button type="button" className="ov-link" onClick={() => setShowAll(!showAll)}>
+                  {showAll ? `Show the newest ${STREAM_ROWS}` : `Show all ${visible.length}`}
+                </button>
+              </div>
             )}
           </section>
 
-          {/* Rendered under "Needs you" before the first snapshot, this panel would be pushed down when it fills. */}
-          {loaded && (
+          <div className="ov-rail">
+            <section ref={needsRef} className="ov-panel ov-needs" aria-labelledby="ov-needs-title">
+              <h2 id="ov-needs-title">Needs you</h2>
+              {waiting.length ? (
+                <>
+                  {waiting.slice(0, NEEDS_SHOWN).map((event) => (
+                    <ApprovalItem key={event.id} event={event} />
+                  ))}
+                  {waiting.length > NEEDS_SHOWN && (
+                    <a className="ov-btn ov-btn-sm" href="#waiting">
+                      {waiting.length - NEEDS_SHOWN} more waiting. See them all
+                    </a>
+                  )}
+                </>
+              ) : (
+                <p className="ov-needs-text">
+                  Nothing is waiting for you. When an agent asks before a risky change, it shows up here with what it
+                  wants and why.
+                </p>
+              )}
+            </section>
+
             <section className="ov-panel" aria-labelledby="ov-sessions-title">
               <h2 id="ov-sessions-title">Sessions</h2>
               {snapshot.sessions.length ? (
@@ -308,9 +308,9 @@ export default function Overview({ snapshot, connected, backendReachable, checke
                 <p className="ov-muted">No sessions recorded yet.</p>
               )}
             </section>
-          )}
+          </div>
         </div>
-      </div>
+      )}
 
       <EventDetail
         event={selected}
