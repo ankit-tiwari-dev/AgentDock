@@ -41,6 +41,16 @@ export function foreignImports(text: string): string[] {
     .filter((s) => !s.startsWith("node:"));
 }
 
+/** The file's text, or "" when it does not exist, read in one step so nothing can change between a check and the read. */
+function readIfPresent(path: string): string {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
+    throw error;
+  }
+}
+
 function normalize(text: string): string {
   return text.replace(/\r\n/g, "\n");
 }
@@ -84,7 +94,7 @@ export function main(argv: string[]): number {
       return 2;
     }
     const target = join(ROOT, copy);
-    const current = existsSync(target) ? normalize(readFileSync(target, "utf8")) : "";
+    const current = normalize(readIfPresent(target));
     if (body(copy, current) === upstream) continue;
     if (sync) {
       writeFileSync(target, copy.endsWith(".ts") ? header(source, commit) + upstream : upstream);
