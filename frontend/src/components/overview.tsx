@@ -20,7 +20,7 @@ import {
   unseenEvents,
 } from "@/lib/events";
 import { ESTIMATED_PROJECT, projectCostView } from "@/lib/cost";
-import { EstimatedMark } from "./page-parts";
+import { EstimatedMark, snapshotLoaded } from "./page-parts";
 
 export const SETUP_COMMAND = "ctrlplane init --agent all";
 const STREAM_ROWS = 50;
@@ -75,6 +75,7 @@ export default function Overview({ snapshot, connected, backendReachable, checke
   const activeSessions = snapshot.sessions.filter((session) => session.status === "active");
   const latest = snapshot.events[0];
   const empty = checked && backendReachable && snapshot.events.length === 0;
+  const loaded = snapshotLoaded(snapshot);
 
   let liveState = "Connecting";
   let lastEvent = "";
@@ -132,7 +133,6 @@ export default function Overview({ snapshot, connected, backendReachable, checke
         <button
           type="button"
           className="ov-card ov-card-button"
-          aria-label={`Blocked: ${snapshot.counts.blockedCalls}. Show blocked calls`}
           onClick={() => {
             setFilter("Blocked");
             searchRef.current?.focus();
@@ -141,11 +141,12 @@ export default function Overview({ snapshot, connected, backendReachable, checke
           <span className="ov-k">Blocked</span>
           <span className="ov-v ov-v-blocked">{snapshot.counts.blockedCalls.toLocaleString()}</span>
           <span className="ov-k">stopped by your rules</span>
+          {/* The visible text names the button (WCAG 2.5.3); the action follows it for a screen reader. */}
+          <span className="sr-only">. Show blocked calls</span>
         </button>
         <button
           type="button"
           className="ov-card ov-card-button ov-card-warn"
-          aria-label={`Asked for approval: ${snapshot.counts.reviewCalls}. Show approval requests`}
           onClick={() => {
             setFilter("Needs approval");
             needsRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -154,6 +155,7 @@ export default function Overview({ snapshot, connected, backendReachable, checke
           <span className="ov-k">Asked for approval</span>
           <span className="ov-v ov-v-ask">{snapshot.counts.reviewCalls.toLocaleString()}</span>
           <span className="ov-k">{asked.length} in the last 15 minutes</span>
+          <span className="sr-only">. Show approval requests</span>
         </button>
         <div className="ov-card">
           <span className="ov-k">Active sessions</span>
@@ -164,7 +166,7 @@ export default function Overview({ snapshot, connected, backendReachable, checke
               : "No agent running"}
           </span>
         </div>
-        <CostCard counts={snapshot.counts} />
+        <CostCard counts={snapshot.counts} loaded={loaded} />
       </section>
 
       <div className="ov-columns">
@@ -271,7 +273,9 @@ export default function Overview({ snapshot, connected, backendReachable, checke
         <div className="ov-rail">
           <section ref={needsRef} className="ov-panel ov-needs" aria-labelledby="ov-needs-title">
             <h2 id="ov-needs-title">Needs you</h2>
-            {waiting.length ? (
+            {!loaded ? (
+              <p className="ov-needs-text">Loading approval requests…</p>
+            ) : waiting.length ? (
               <>
                 {waiting.slice(0, NEEDS_SHOWN).map((event) => (
                   <ApprovalItem key={event.id} event={event} />
@@ -290,16 +294,19 @@ export default function Overview({ snapshot, connected, backendReachable, checke
             )}
           </section>
 
-          <section className="ov-panel" aria-labelledby="ov-sessions-title">
-            <h2 id="ov-sessions-title">Sessions</h2>
-            {snapshot.sessions.length ? (
-              snapshot.sessions
-                .slice(0, 5)
-                .map((session) => <SessionLine key={session.id} session={session} now={now} />)
-            ) : (
-              <p className="ov-muted">No sessions recorded yet.</p>
-            )}
-          </section>
+          {/* Rendered under "Needs you" before the first snapshot, this panel would be pushed down when it fills. */}
+          {loaded && (
+            <section className="ov-panel" aria-labelledby="ov-sessions-title">
+              <h2 id="ov-sessions-title">Sessions</h2>
+              {snapshot.sessions.length ? (
+                snapshot.sessions
+                  .slice(0, 5)
+                  .map((session) => <SessionLine key={session.id} session={session} now={now} />)
+              ) : (
+                <p className="ov-muted">No sessions recorded yet.</p>
+              )}
+            </section>
+          )}
         </div>
       </div>
 
@@ -336,12 +343,7 @@ function StreamRow({ event, fresh, onOpen }: { event: DashboardEvent; fresh: boo
   const target = eventTarget(event);
   const rule = ruleName(event);
   return (
-    <button
-      type="button"
-      className={`ov-row ${fresh ? "ov-fresh" : ""}`}
-      onClick={onOpen}
-      aria-label={`${agentLabel(event.agent)} ${action} ${target}, ${status}${rule ? `, rule ${rule}` : ""}. Open details`}
-    >
+    <button type="button" className={`ov-row ${fresh ? "ov-fresh" : ""}`} onClick={onOpen}>
       <span className="ov-mono ov-muted">{clock(event.timestamp)}</span>
       <span>{agentLabel(event.agent)}</span>
       <span className="ov-action">
@@ -351,16 +353,23 @@ function StreamRow({ event, fresh, onOpen }: { event: DashboardEvent; fresh: boo
         <StatusChip status={status} />
       </span>
       <span className="ov-mono ov-rule">{rule || "-"}</span>
+      <span className="sr-only">. Open details</span>
     </button>
   );
 }
 
-function CostCard({ counts }: { counts: DashboardSnapshot["counts"] }) {
+function CostCard({ counts, loaded }: { counts: DashboardSnapshot["counts"]; loaded: boolean }) {
   const view = projectCostView(counts);
   return (
     <div className="ov-card">
       <span className="ov-k">Cost (Claude Code)</span>
-      {view.kind === "recorded" ? (
+      {/* Before the first snapshot it keeps the recorded layout; the taller "none" help text would shrink the row. */}
+      {!loaded ? (
+        <>
+          <span className="ov-v">–</span>
+          <span className="ov-k">Loading</span>
+        </>
+      ) : view.kind === "recorded" ? (
         <>
           <span className="ov-v">{view.costText}</span>
           <span className="ov-k">

@@ -5,7 +5,9 @@ import {
   type ModelList,
   type ProviderName,
   type SettingsView,
+  KEY_PROVIDERS,
   PROVIDER_LABEL,
+  modelListFor,
   settingsView,
   supervisorStatus,
 } from "@/lib/settings";
@@ -30,12 +32,12 @@ async function readJson<T>(response: Response): Promise<T> {
   return body;
 }
 
-function CopyCommand({ command, label, onCopy }: { command: string; label: string; onCopy: Props["onCopy"] }) {
+function CopyCommand({ command, what, onCopy }: { command: string; what: string; onCopy: Props["onCopy"] }) {
   return (
     <div className="pg-cmd">
       <code>{command}</code>
-      <button type="button" className="ov-btn ov-btn-sm" aria-label={label} onClick={() => onCopy(command, "Command")}>
-        Copy
+      <button type="button" className="ov-btn ov-btn-sm" onClick={() => onCopy(command, "Command")}>
+        Copy<span className="sr-only"> {what}</span>
       </button>
     </div>
   );
@@ -63,13 +65,15 @@ export default function Settings({ apiOrigin, onCopy, onToast }: Props) {
       .catch(() => setLoadError("The settings could not be loaded. Is the backend running?"));
   }, [apiOrigin]);
 
+  const listFor = modelListFor(picked, view);
+
   // The list comes from the provider with the saved key, so it is fetched only for the provider picked.
   useEffect(() => {
     setModels(null);
     setModelsError("");
-    if (picked === "codex" || !view) return;
+    if (!listFor) return;
     let current = true;
-    fetch(`${apiOrigin}/api/supervisor/models?provider=${encodeURIComponent(picked)}`, { cache: "no-store" })
+    fetch(`${apiOrigin}/api/supervisor/models?provider=${encodeURIComponent(listFor)}`, { cache: "no-store" })
       .then((response) => readJson<ModelList>(response))
       .then((list) => {
         if (!current) return;
@@ -80,24 +84,19 @@ export default function Settings({ apiOrigin, onCopy, onToast }: Props) {
     return () => {
       current = false;
     };
-  }, [apiOrigin, picked, view]);
+  }, [apiOrigin, listFor]);
 
-  if (!view) {
-    return (
-      <>
-        <PageHead title="Settings" lede="Which AI the supervisor in Plan & review uses." />
-        <p className="pg-note">{loadError || "Loading settings…"}</p>
-      </>
-    );
-  }
-
-  const shown = settingsView(view, models);
-  const status = supervisorStatus(view);
-  const inDocker = !view.writable && view.keys.claude === null && view.keys["openai-compatible"] === null;
-  const [statusHead, ...statusParts] = status.text.split(". ");
+  // The page's frame renders before the settings arrive, since reading them can wait on the OS keychain.
+  const shown = view ? settingsView(view, models) : null;
+  const status = view ? supervisorStatus(view) : null;
+  const canSave = shown?.canSave ?? false;
+  const inDocker =
+    view !== null && !view.writable && view.keys.claude === null && view.keys["openai-compatible"] === null;
+  const [statusHead, ...statusParts] = (status?.text ?? "").split(". ");
   const statusRest = statusParts.join(". ");
   const chosenModel = picked === "codex" ? codexModel.trim() || null : selected;
-  const canSubmit = shown.canSave && !saving && (picked === "codex" || Boolean(selected));
+  const canSubmit = canSave && !saving && (picked === "codex" || Boolean(selected));
+  const loading = loadError ? <span className="pg-warn">{loadError}</span> : "Loading…";
 
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -137,19 +136,35 @@ export default function Settings({ apiOrigin, onCopy, onToast }: Props) {
           </div>
           <dl className="pg-facts">
             <dt>Provider</dt>
-            <dd>{shown.providerLabel}</dd>
+            <dd>{shown ? shown.providerLabel : loading}</dd>
             <dt>Model</dt>
-            <dd>{view.model ? <code>{view.model}</code> : view.provider === "codex" ? "Codex's default" : "None"}</dd>
+            <dd>
+              {!view ? (
+                loading
+              ) : view.model ? (
+                <code>{view.model}</code>
+              ) : view.provider === "codex" ? (
+                "Codex's default"
+              ) : (
+                "None"
+              )}
+            </dd>
             <dt>Status</dt>
             <dd>
-              <span className={status.good ? "pg-good" : "pg-warn"}>{statusHead}</span>
-              {statusRest && `. ${statusRest}`}
+              {status ? (
+                <>
+                  <span className={status.good ? "pg-good" : "pg-warn"}>{statusHead}</span>
+                  {statusRest && `. ${statusRest}`}
+                </>
+              ) : (
+                loading
+              )}
             </dd>
           </dl>
 
           <form className="st-form" aria-labelledby="st-change" onSubmit={save}>
             <h3 id="st-change">Change provider or model</h3>
-            <fieldset className="pg-q" disabled={!shown.canSave}>
+            <fieldset className="pg-q" disabled={!canSave}>
               <legend>Provider</legend>
               <p>Keys and the base URL are set in the terminal, not here.</p>
               {CHOICES.map((choice) => (
@@ -158,7 +173,7 @@ export default function Settings({ apiOrigin, onCopy, onToast }: Props) {
                     type="radio"
                     name="provider"
                     value={choice.value}
-                    checked={picked === choice.value}
+                    checked={view !== null && picked === choice.value}
                     onChange={() => setPicked(choice.value)}
                   />
                   <span className="st-choice-text">
@@ -179,7 +194,7 @@ export default function Settings({ apiOrigin, onCopy, onToast }: Props) {
                   id="st-model-input"
                   type="text"
                   value={codexModel}
-                  disabled={!shown.canSave}
+                  disabled={!canSave}
                   spellCheck={false}
                   autoComplete="off"
                   aria-describedby="st-model-input-help"
@@ -198,18 +213,20 @@ export default function Settings({ apiOrigin, onCopy, onToast }: Props) {
                   className="st-select"
                   id="st-model-select"
                   value={selected}
-                  disabled={!shown.canSave || shown.modelOptions.length === 0}
+                  disabled={!shown?.canSave || shown.modelOptions.length === 0}
                   aria-describedby="st-model-help"
                   onChange={(event) => setSelected(event.target.value)}
                 >
-                  {shown.modelOptions.map((model) => (
+                  {(shown?.modelOptions ?? []).map((model) => (
                     <option key={model} value={model}>
                       {model}
                     </option>
                   ))}
                 </select>
                 <p className="st-help" id="st-model-help">
-                  {modelsError ? (
+                  {!view ? (
+                    loading
+                  ) : modelsError ? (
                     <span className="pg-warn">{modelsError}</span>
                   ) : models ? (
                     "From the provider's model list."
@@ -220,24 +237,22 @@ export default function Settings({ apiOrigin, onCopy, onToast }: Props) {
               </div>
             )}
 
-            {picked === "openai-compatible" && (
+            {view && picked === "openai-compatible" && (
               <div className="st-base">
                 <span className="pg-field">Base URL</span>
                 <code>{view.baseUrl ?? "Not set"}</code>
                 <p className="st-help">Read-only here. To change it, run:</p>
                 <div className="st-cmd-only">
-                  <CopyCommand
-                    command={BASE_URL_COMMAND}
-                    label="Copy the command to change the base URL"
-                    onCopy={onCopy}
-                  />
+                  <CopyCommand command={BASE_URL_COMMAND} what="the command to change the base URL" onCopy={onCopy} />
                 </div>
               </div>
             )}
 
             <div className="pg-form-foot">
               <span>
-                {saveError ? (
+                {!shown ? (
+                  loading
+                ) : saveError ? (
                   <span className="pg-warn">{saveError}</span>
                 ) : inDocker ? (
                   "Saving is off in Docker."
@@ -260,7 +275,14 @@ export default function Settings({ apiOrigin, onCopy, onToast }: Props) {
               <h2 id="st-keys">API keys</h2>
             </div>
             <dl className="pg-facts">
-              {shown.keyRows.map((row) => (
+              {!shown &&
+                KEY_PROVIDERS.map((provider) => (
+                  <Fragment key={provider}>
+                    <dt>{PROVIDER_LABEL[provider]}</dt>
+                    <dd>Key saved: {loading}</dd>
+                  </Fragment>
+                ))}
+              {shown?.keyRows.map((row) => (
                 <Fragment key={row.provider}>
                   <dt>{PROVIDER_LABEL[row.provider]}</dt>
                   <dd>
@@ -281,7 +303,7 @@ export default function Settings({ apiOrigin, onCopy, onToast }: Props) {
                     {row.showCommand && (
                       <CopyCommand
                         command={`ctrlplane supervisor set-key ${row.provider}`}
-                        label={`Copy the command to save ${row.provider === "claude" ? "a Claude" : "an OpenAI-compatible"} key`}
+                        what={`the command to save ${row.provider === "claude" ? "a Claude" : "an OpenAI-compatible"} key`}
                         onCopy={onCopy}
                       />
                     )}
