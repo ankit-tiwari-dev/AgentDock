@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { reviewSchema, supervisorSchema, type ReviewResult, type SupervisorResult } from "./supervisor-schemas.ts";
 import {
   SupervisorError,
+  interviewMode,
   classifyCodexExit,
   scrub,
   type RunContext,
@@ -53,7 +54,7 @@ export class CodexRoleService implements SupervisorProvider {
     developerAnswers?: Record<string, string>,
     ctx?: RunContext,
   ): Promise<SupervisorResult> {
-    const mode = developerAnswers ? "finalize" : "questions";
+    const mode = interviewMode(developerAnswers);
     const prompt =
       mode === "questions"
         ? `You are the product supervisor for this software repository. Inspect relevant files read-only, then clarify the feature request below. Ask 2-4 concrete, high-impact questions only where repository context and the request do not already answer them. Suggested answers should be short, realistic choices. Do not implement or edit files. Return isRefined=false and clarificationQuestions; omit lockedSpecification.\n\nFEATURE REQUEST:\n${featurePrompt}`

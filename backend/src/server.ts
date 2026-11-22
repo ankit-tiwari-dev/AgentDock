@@ -13,7 +13,14 @@ import { hasKey, keyStatusCache, type KeyReadOptions } from "./key-reader.ts";
 import { applySettingsChange, listModels, readSettingsView, type SettingsDeps } from "./supervisor-settings.ts";
 import { isInContainer, resolveSupervisor, supervisorHome, type ResolvedSupervisor } from "./provider-resolver.ts";
 import { stdoutLogSink } from "./run-log.ts";
-import { ERROR_MESSAGES, SupervisorError, type ProviderName, type RunMode } from "./supervisor-provider.ts";
+import {
+  ERROR_MESSAGES,
+  SupervisorError,
+  interviewMode,
+  isAnswerMap,
+  type ProviderName,
+  type RunMode,
+} from "./supervisor-provider.ts";
 import { runSupervisor } from "./supervisor-runner.ts";
 import type { SupervisorInterviewRequest, TrajectoryLoopCheckRequest, WSEventMessage } from "./types.ts";
 import type { ReviewResult, SupervisorResult } from "./supervisor-schemas.ts";
@@ -387,6 +394,10 @@ export class AgentDockBackendServer {
           this.sendJson(res, 400, { error: "Missing required 'featurePrompt'" });
           return;
         }
+        if (body.developerAnswers !== undefined && !isAnswerMap(body.developerAnswers)) {
+          this.sendJson(res, 400, { error: "'developerAnswers' must be an object of question id to answer text" });
+          return;
+        }
 
         const announce = (result: {
           isRefined: boolean;
@@ -411,7 +422,7 @@ export class AgentDockBackendServer {
           announce(this.supervisor.conductInterview(body));
           return;
         }
-        const mode: RunMode = body.developerAnswers ? "finalize" : "questions";
+        const mode: RunMode = interviewMode(body.developerAnswers);
         this.runLocked(res, resolved, mode, project!, body, (result) => announce(result as SupervisorResult));
       });
       return;

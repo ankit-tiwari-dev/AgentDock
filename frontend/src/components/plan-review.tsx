@@ -70,7 +70,13 @@ export default function PlanReview({ apiOrigin, supervisor, project, showProject
       });
       setInterview(result);
       const questions = result.clarificationQuestions || [];
-      setAnswers(Object.fromEntries(questions.map((question) => [question.id, question.suggestedAnswers[0]])));
+      setAnswers(
+        Object.fromEntries(
+          questions.flatMap((question) =>
+            question.suggestedAnswers[0] ? [[question.id, question.suggestedAnswers[0]]] : [],
+          ),
+        ),
+      );
     } catch (error) {
       onToast(
         error instanceof Error ? error.message : "The supervisor did not answer. Check that the backend is running.",
@@ -86,7 +92,8 @@ export default function PlanReview({ apiOrigin, supervisor, project, showProject
       setInterview(
         await postJson<Interview>(`/api/supervisor/interview${projectQuery(planFor?.id)}`, {
           featurePrompt: prompt,
-          developerAnswers: answers,
+          // The backend locks a plan only on a non-empty answer, so "no questions" is sent as the developer's go-ahead.
+          developerAnswers: questions?.length ? answers : { request: "Build the request as written." },
         }),
       );
     } catch (error) {

@@ -1,5 +1,6 @@
 import {
   SupervisorError,
+  interviewMode,
   classifyHttpStatus,
   classifyNetworkError,
   scrub,
@@ -64,7 +65,7 @@ export class OpenAICompatibleProvider implements SupervisorProvider {
     developerAnswers?: Record<string, string>,
     ctx?: RunContext,
   ): Promise<SupervisorResult> {
-    return (await this.run(developerAnswers ? "finalize" : "questions", ctx)) as SupervisorResult;
+    return (await this.run(interviewMode(developerAnswers), ctx)) as SupervisorResult;
   }
 
   async review(ctx?: RunContext): Promise<ReviewResult> {
