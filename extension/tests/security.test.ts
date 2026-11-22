@@ -1,22 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:net";
-import { SecretManager } from "../src/secret-manager.ts";
 import { AgentDockSidebarProvider } from "../src/sidebar-provider.ts";
-import type { SecretStorageLike } from "../src/types.ts";
-
-class MemorySecretStorage implements SecretStorageLike {
-  private values = new Map<string, string>();
-  async get(key: string) {
-    return this.values.get(key);
-  }
-  async store(key: string, value: string) {
-    this.values.set(key, value);
-  }
-  async delete(key: string) {
-    this.values.delete(key);
-  }
-}
 
 /** A port that was free a moment ago, so a connection to it is refused. */
 async function closedPort(): Promise<number> {
@@ -27,7 +12,7 @@ async function closedPort(): Promise<number> {
   return typeof address === "object" && address ? address.port : 1;
 }
 
-const provider = (port = 45820) => new AgentDockSidebarProvider(new SecretManager(new MemorySecretStorage()), port);
+const provider = (port = 45820) => new AgentDockSidebarProvider(port);
 
 test("regression: the webview has a Content Security Policy that only runs its own script", () => {
   const html = provider().getHtmlForWebview();

@@ -1,40 +1,17 @@
 import { randomBytes } from "node:crypto";
-import type { SecretManager } from "./secret-manager.ts";
 import type { WebviewMessage } from "./types.ts";
 
 export class AgentDockSidebarProvider {
-  private secretManager: SecretManager;
   private backendPort: number;
 
-  constructor(secretManager: SecretManager, backendPort = 45820) {
-    this.secretManager = secretManager;
+  constructor(backendPort = 45820) {
     this.backendPort = backendPort;
   }
 
   public async handleMessage(message: WebviewMessage, postMessageToWebview: (msg: unknown) => void): Promise<void> {
     switch (message.type) {
       case "ready": {
-        const hasGemini = await this.secretManager.hasKeyForProvider("gemini");
-        const hasClaude = await this.secretManager.hasKeyForProvider("claude");
-        postMessageToWebview({
-          type: "status_update",
-          hasGemini,
-          hasClaude,
-          backendPort: this.backendPort,
-        });
-        break;
-      }
-
-      case "save_api_key": {
-        if (message.provider === "gemini") {
-          await this.secretManager.setGeminiKey(message.key);
-        } else if (message.provider === "claude") {
-          await this.secretManager.setClaudeKey(message.key);
-        }
-        postMessageToWebview({
-          type: "key_saved",
-          provider: message.provider,
-        });
+        postMessageToWebview({ type: "status_update", backendPort: this.backendPort });
         break;
       }
 
@@ -132,7 +109,7 @@ export class AgentDockSidebarProvider {
     button:hover {
       background: var(--vscode-button-hoverBackground);
     }
-    textarea, input[type="text"], input[type="password"] {
+    textarea, input[type="text"] {
       width: 100%;
       box-sizing: border-box;
       background: var(--vscode-input-background);
@@ -185,20 +162,17 @@ export class AgentDockSidebarProvider {
 
   <div class="card">
     <div style="font-size: 11px; font-weight: 600; margin-bottom: 4px;">AI Model Configuration</div>
-    <div style="font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 8px;">
-      Store keys securely in OS Keychain (vscode.SecretStorage):
+    <!-- Keys live only in the OS keychain and are entered through the CLI, never through a UI (D-13). -->
+    <div style="font-size: 11px; color: var(--vscode-descriptionForeground);">
+      To save the supervisor's API key, run this in a terminal:
     </div>
-    <input type="password" id="geminiKeyInput" placeholder="Gemini API key" />
-    <button id="btnSaveGemini" style="background: var(--vscode-button-secondaryBackground, #374151); color: var(--vscode-button-secondaryForeground, #fff);">
-      Save Gemini Key 🔑
-    </button>
+    <code style="display: block; font-size: 11px; margin-top: 4px;">ctrlplane supervisor set-key &lt;claude|openai-compatible&gt;</code>
   </div>
 
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     document.getElementById('btnAsk').addEventListener('click', () => startInterview());
     document.getElementById('btnLock').addEventListener('click', () => lockCriteria());
-    document.getElementById('btnSaveGemini').addEventListener('click', () => saveKey('gemini'));
 
     function el(tag, text) {
       const node = document.createElement(tag);
@@ -226,20 +200,8 @@ export class AgentDockSidebarProvider {
       vscode.postMessage({ type: 'submit_answers', prompt, answers });
     }
 
-    function saveKey(provider) {
-      const key = document.getElementById('geminiKeyInput').value;
-      if (!key) return;
-      vscode.postMessage({ type: 'save_api_key', provider, key });
-    }
-
     window.addEventListener('message', event => {
       const msg = event.data;
-      if (msg.type === 'key_saved') {
-        // Shown only once the extension has confirmed the save.
-        document.getElementById('geminiKeyInput').value = '';
-        alert('Key saved to the OS keychain.');
-      }
-
       if (msg.type === 'backend_offline') {
         document.getElementById('btnAsk').innerText = 'Ask Supervisor to Clarify →';
         const notice = document.getElementById('offlineNotice');
