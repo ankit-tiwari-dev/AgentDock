@@ -5,19 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { AgentDockBackendServer } from "../src/server.ts";
+import { applyCliSchema } from "./live-view-fixture.ts";
 
 function auditProject() {
   const dir = mkdtempSync(join(tmpdir(), "agentdock-api-"));
   mkdirSync(join(dir, ".ctrlplane"));
   const db = new DatabaseSync(join(dir, ".ctrlplane", "audit.db"));
-  db.exec(`PRAGMA journal_mode = WAL;
-    CREATE TABLE sessions (id TEXT PRIMARY KEY, agent_type TEXT NOT NULL, project_path TEXT NOT NULL,
-      git_branch TEXT NOT NULL, base_commit_sha TEXT NOT NULL, head_commit_sha TEXT, spec_id TEXT, status TEXT NOT NULL,
-      started_at INTEGER NOT NULL, ended_at INTEGER, metadata_json TEXT);
-    CREATE TABLE events (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, sequence_num INTEGER NOT NULL,
-      event_type TEXT NOT NULL, tool_name TEXT, tool_input_json TEXT, tool_output_json TEXT,
-      is_blob_stored INTEGER NOT NULL DEFAULT 0, policy_verdict TEXT, policy_reason TEXT, execution_duration_ms INTEGER,
-      created_at INTEGER NOT NULL);`);
+  applyCliSchema(db, { withRuleId: false, withUsage: false, withCreatedAtIndex: false });
   db.prepare(
     "INSERT INTO sessions VALUES ('s1', 'claude-code', ?, 'main', 'abc', NULL, NULL, 'active', ?, NULL, NULL)",
   ).run(dir, Date.now());
