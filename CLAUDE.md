@@ -72,3 +72,13 @@ When the developer corrects a mistake, fix it and add its rule here. A rule whos
 
 - Comment only a non-obvious why: a security reason, a platform quirk, a rule from a decision.
 - One sentence. No block comments, no step-by-step comments, no notes about your own edit.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in this repo's GitHub Issues (via the `gh` CLI). See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` at the repo root; decisions go in `docs/DECISIONS.md` (D-N), not `docs/adr/`. See `docs/agents/domain.md`.
