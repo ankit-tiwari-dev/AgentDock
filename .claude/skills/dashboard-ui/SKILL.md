@@ -81,7 +81,7 @@ A new page also needs: an id in `PAGES`, an entry in `NAV` with its group, and a
 The backend sends a Content Security Policy with every page (`contentSecurityPolicy` in `backend/src/static-files.ts`):
 
 - Scripts: only the dashboard's own files and its build's inline scripts, by hash. No script from another host, no `eval`, no inline event handler strings.
-- Styles: own files and inline styles. Fonts: own files plus the two Google Fonts hosts, which `ISSUE.md` → I-14 plans to remove. Do not add another font, icon font or CDN.
+- Styles: own files and inline styles. Fonts: own files only; Inter and JetBrains Mono are bundled from `frontend/src/app/fonts/`. Do not add another font, icon font or CDN.
 - Images: own files and `data:` URLs. Icons are inline SVG.
 - Network: only this backend and its WebSocket.
 

@@ -2,6 +2,7 @@
 * text=auto eol=lf
 *.png binary
 *.ico binary
+*.woff2 binary
 *.vsix binary
 *.db binary
 *.gz binary

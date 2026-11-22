@@ -45,7 +45,7 @@ Each comes from a fixed bug or a decision. Breaking one is a high-severity findi
 - Request bodies stop at 1 MB (I-3). A bad percent-escape gets 400, never an exception (I-11).
 - The audit log is opened read-only (`readOnly: true`). The backend never writes to it (D-1).
 - The dashboard never builds HTML out of data: no `dangerouslySetInnerHTML`, `innerHTML`, `outerHTML` or `insertAdjacentHTML` (I-4). The extension webview keeps its CSP and nonce (I-5).
-- Every HTML response carries the CSP from `backend/src/static-files.ts`. Do not add a host to it. The only outside hosts are the two Google Fonts hosts, and `ISSUE.md` → I-14 tracks removing them.
+- Every HTML response carries the CSP from `backend/src/static-files.ts`. Do not add a host to it; it names no outside host, and `backend/tests/static-serving.test.ts` fails if one comes back.
 - The backend's only npm dependency is `@anthropic-ai/sdk` (D-10); anything else breaks the Docker image, and `npm run check:arch` fails on it.
 - Docker settings in `compose.yaml` and the `Dockerfile` follow D-4. Use the `agentdock-docker` skill before changing them.
 
