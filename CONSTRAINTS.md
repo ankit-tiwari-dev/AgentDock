@@ -52,8 +52,11 @@ Measured 2026-11-21 with `npm run test:coverage` (Node 26.13, Windows). The 0.5 
 
 ## Exceptions
 
-| ID  | Rule | Path | Reason | Owner | Expires |
-| --- | ---- | ---- | ------ | ----- | ------- |
+A row whose Rule names a floor-guard rule (`assertion-removed`, `test-deleted`, …) and whose Path holds backticked globs makes `scripts/floor-guard.ts` accept those findings until the Expires date. Adding a row is itself a floor finding once this file is on `main`, so every exception reaches a reviewer.
+
+| ID  | Rule              | Path                            | Reason                                                                                                                                                                   | Owner             | Expires    |
+| --- | ----------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------- | ---------- |
+| E1  | assertion-removed | `backend/tests/backend.test.ts` | The loop-check and cost tests covered `/api/supervisor/loop-check` and `/api/cost/calculate`, which were deleted with their code (L1); nothing is left for them to test. | @ankit-tiwari-dev | 2027-02-20 |
 
 ## Known gaps
 
