@@ -21,6 +21,8 @@ RUN npm run build
 # the Anthropic SDK, is loaded only when the Claude supervisor runs, and API supervisors are refused in the container
 # because it has no host keychain.
 FROM node:24-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5
+# Alpine security fixes land before the Node image is rebuilt, and the release scan blocks on them (D-14).
+RUN apk upgrade --no-cache
 WORKDIR /app
 ENV NODE_ENV=production \
     AGENTDOCK_PROJECT=/project \
