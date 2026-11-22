@@ -199,3 +199,10 @@ Status flow: FOUND → IN PROGRESS → FIXED. Each entry: symptoms, root cause, 
 - **Root cause:** no icon in the app; one `Cache-Control` value for every static file (`backend/src/server.ts`); the models effect in `frontend/src/components/settings.tsx` depended on the whole settings object.
 - **Fix:** `frontend/src/app/icon.svg`; `public, max-age=31536000, immutable` for `/_next/static/` only; `modelListFor()` in `frontend/src/lib/settings.ts` decides from the picked provider and its key.
 - **Verification:** `regression:` tests in `backend/tests/static-serving.test.ts`, `frontend/tests/assets.test.ts` and `frontend/tests/settings.test.ts`.
+
+## I-30 · FIXED · The image shipped six known OpenSSL and zlib vulnerabilities
+
+- **Symptoms:** `osv-scanner scan image` on the built image reported 6 known vulnerabilities (1 critical, 4 high, 1 medium) in Alpine's `openssl` 3.5.9-r0 and `zlib` 1.3.2-r1, all with fixes available.
+- **Root cause:** the digest-pinned `node:24-alpine` base in `Dockerfile` predates the Alpine fixes, and the newest `node:24-alpine` digest was the same one, so a digest update could not help. The lockfile scan in `security.yml` reads only `package-lock.json` and never saw the image's OS packages.
+- **Fix:** the runtime stage runs `apk upgrade --no-cache`, and the release workflow scans the image before publishing it (D-14).
+- **Verification:** after the change, `osv-scanner scan image --config osv-scanner.toml` on the built image: "No issues found"; `npm run docker:smoke` passed.

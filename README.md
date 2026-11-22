@@ -91,7 +91,14 @@ Why it works this way: [`docs/DECISIONS.md`](docs/DECISIONS.md) → D-3, D-9, D-
 
 ## Run with Docker
 
-Needs only Docker. From a clone of this repo:
+Needs only Docker. Each release publishes a signed image (D-14). Check where it came from, then run it:
+
+```bash
+gh attestation verify oci://ghcr.io/ankit-tiwari-dev/agentdock:<version> -R ankit-tiwari-dev/AgentDock
+docker run --rm -p 127.0.0.1:45820:45820 -v /path/to/your/project:/project:ro ghcr.io/ankit-tiwari-dev/agentdock:<version>
+```
+
+Or build it yourself from a clone of this repo:
 
 ```bash
 AGENTDOCK_PROJECT_DIR=/path/to/your/project docker compose up --build

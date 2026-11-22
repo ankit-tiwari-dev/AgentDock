@@ -33,3 +33,4 @@ Each one is explained in `docs/DECISIONS.md` (D-4) and the README section "Run w
 - **Runtime stage without `node_modules`.** The backend uses only Node's built-in modules. A new npm dependency in `backend/` breaks the image, so the smoke test fails.
 - **Files owned by root, server running as `node`**, plus `read_only: true`, `tmpfs: /tmp`, `cap_drop: ALL` and `no-new-privileges` in compose. The server cannot change its own code.
 - **Base image pinned by `@sha256:` digest** in both stages. Update the digest on purpose, in its own commit.
+- **`apk upgrade --no-cache` in the runtime stage.** It takes Alpine security fixes the pinned Node image does not have yet; the release scan blocks without them (D-14, I-30).
