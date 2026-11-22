@@ -60,6 +60,12 @@ export function settingsView(
   };
 }
 
+/** The provider whose model list the page needs, or null; a save's new settings object must not refetch it. */
+export function modelListFor(picked: ProviderName, view: SettingsView | null): ProviderName | null {
+  // The list is fetched with the saved key, so without one the request can only fail.
+  return view && picked !== "codex" && view.keys[picked] ? picked : null;
+}
+
 /** Ready means a click in Plan & review would start a model call. */
 export function supervisorStatus(s: SettingsView): { good: boolean; text: string } {
   if (s.configProblem) return { good: false, text: `Not ready. ${s.configProblem}` };
