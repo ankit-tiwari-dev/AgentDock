@@ -197,6 +197,7 @@ export class AgentDockSidebarProvider {
         const sel = document.querySelector(\`input[name="ans_\${CSS.escape(q.id)}"]:checked\`);
         if (sel) answers[q.id] = sel.value;
       });
+      if (Object.keys(answers).length === 0) return;
       vscode.postMessage({ type: 'submit_answers', prompt, answers });
     }
 

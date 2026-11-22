@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { SupervisorInterviewRequest, SupervisorInterviewResponse, ClarificationQuestion } from "./types.ts";
+import { interviewMode } from "./supervisor-provider.ts";
 
 export class SupervisorService {
   /**
@@ -11,7 +12,7 @@ export class SupervisorService {
     const answers = req.developerAnswers;
 
     // Phase 1: If developer hasn't answered questions yet, formulate 2-3 product questions
-    if (!answers || Object.keys(answers).length === 0) {
+    if (!answers || interviewMode(answers) === "questions") {
       const questions = this.generateClarificationQuestions(prompt);
       return {
         isRefined: false,
