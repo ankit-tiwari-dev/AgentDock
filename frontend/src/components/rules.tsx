@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { type DashboardSnapshot, type RuleSummary, summarizeRules } from "@/lib/events";
 import { CommandLine, PageHead, PartialNote, revealOnPhone } from "./page-parts";
 import { StatusChip, clock } from "./overview";
@@ -17,7 +17,7 @@ export default function Rules({
 }) {
   const [picked, setPicked] = useState<string | null>(null);
   const detail = useRef<HTMLElement>(null);
-  const rules = summarizeRules(snapshot.events);
+  const rules = useMemo(() => summarizeRules(snapshot.events), [snapshot.events]);
   const selected = rules.find((rule) => rule.id === picked) ?? rules[0];
 
   return (

@@ -1,7 +1,8 @@
 "use client";
 
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, memo, useEffect, useMemo, useRef, useState } from "react";
 import {
+  type ApprovalWindow,
   type DashboardEvent,
   type DashboardSession,
   type DashboardSnapshot,
@@ -11,9 +12,9 @@ import {
   eventTarget,
   filterStream,
   newlyArrived,
+  nextApprovalExpiry,
   projectName,
   approvalRequests,
-  recentApprovalRequests,
   relativeTime,
   statusTone,
   streamCounts,
@@ -40,21 +41,15 @@ export default function Overview({ snapshot, connected, backendReachable, checke
   const [query, setQuery] = useState("");
   const [frozen, setFrozen] = useState<DashboardEvent[] | null>(null);
   const [selected, setSelected] = useState<DashboardEvent | null>(null);
-  const [now, setNow] = useState(() => Date.now());
   const [fresh, setFresh] = useState<Set<string>>(() => new Set());
   const seen = useRef<Set<string> | null>(null);
   const freshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const searchRef = useRef<HTMLInputElement>(null);
   const needsRef = useRef<HTMLElement>(null);
 
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
   const paused = frozen !== null;
   const shown = frozen ?? snapshot.events;
-  const queued = paused ? unseenEvents(snapshot.events, frozen) : [];
+  const queued = useMemo(() => (frozen ? unseenEvents(snapshot.events, frozen) : []), [snapshot.events, frozen]);
 
   useEffect(() => {
     const added = newlyArrived(seen.current, shown);
@@ -70,21 +65,30 @@ export default function Overview({ snapshot, connected, backendReachable, checke
 
   const counts = useMemo(() => streamCounts(shown), [shown]);
   const visible = useMemo(() => filterStream(shown, filter, query), [shown, filter, query]);
-  const asked = recentApprovalRequests(snapshot.approvals, now);
-  const waiting = approvalRequests(snapshot, now).waiting;
+  const { events, approvals } = snapshot;
+  const windowNow = useWindowNow(approvals);
+  const { recent: asked, waiting } = useMemo(
+    () => approvalRequests({ events, approvals }, windowNow),
+    [events, approvals, windowNow],
+  );
   const activeSessions = snapshot.sessions.filter((session) => session.status === "active");
   const latest = snapshot.events[0];
   const empty = checked && backendReachable && snapshot.events.length === 0;
 
   let liveState = "Connecting";
-  let lastEvent = "";
+  let lastEvent: ReactNode = null;
   let liveTone = "ov-live-off";
   if (checked && !backendReachable) {
     liveState = "Offline · reconnecting";
     liveTone = "ov-live-down";
   } else if (connected) {
     liveState = paused ? "Paused" : "Live";
-    lastEvent = latest ? ` · last event ${relativeTime(latest.timestamp, now).toLowerCase()}` : "";
+    lastEvent = latest ? (
+      <>
+        {" "}
+        · last event <Ago time={latest.timestamp} />
+      </>
+    ) : null;
     liveTone = paused ? "ov-live-off" : "";
   }
 
@@ -251,7 +255,7 @@ export default function Overview({ snapshot, connected, backendReachable, checke
               <ul>
                 {(showAll ? visible : visible.slice(0, STREAM_ROWS)).map((event) => (
                   <li key={event.id}>
-                    <StreamRow event={event} fresh={fresh.has(event.id)} onOpen={() => setSelected(event)} />
+                    <StreamRow event={event} fresh={fresh.has(event.id)} onOpen={setSelected} />
                   </li>
                 ))}
               </ul>
@@ -293,9 +297,7 @@ export default function Overview({ snapshot, connected, backendReachable, checke
           <section className="ov-panel" aria-labelledby="ov-sessions-title">
             <h2 id="ov-sessions-title">Sessions</h2>
             {snapshot.sessions.length ? (
-              snapshot.sessions
-                .slice(0, 5)
-                .map((session) => <SessionLine key={session.id} session={session} now={now} />)
+              snapshot.sessions.slice(0, 5).map((session) => <SessionLine key={session.id} session={session} />)
             ) : (
               <p className="ov-muted">No sessions recorded yet.</p>
             )}
@@ -330,7 +332,16 @@ function FilterPill({
   );
 }
 
-function StreamRow({ event, fresh, onOpen }: { event: DashboardEvent; fresh: boolean; onOpen: () => void }) {
+// Memoized so a refresh or a filter change re-renders only the rows whose event or highlight changed.
+const StreamRow = memo(function StreamRow({
+  event,
+  fresh,
+  onOpen,
+}: {
+  event: DashboardEvent;
+  fresh: boolean;
+  onOpen: (event: DashboardEvent) => void;
+}) {
   const status = eventStatus(event);
   const action = event.toolName || event.hookEventName;
   const target = eventTarget(event);
@@ -339,7 +350,7 @@ function StreamRow({ event, fresh, onOpen }: { event: DashboardEvent; fresh: boo
     <button
       type="button"
       className={`ov-row ${fresh ? "ov-fresh" : ""}`}
-      onClick={onOpen}
+      onClick={() => onOpen(event)}
       aria-label={`${agentLabel(event.agent)} ${action} ${target}, ${status}${rule ? `, rule ${rule}` : ""}. Open details`}
     >
       <span className="ov-mono ov-muted">{clock(event.timestamp)}</span>
@@ -353,7 +364,7 @@ function StreamRow({ event, fresh, onOpen }: { event: DashboardEvent; fresh: boo
       <span className="ov-mono ov-rule">{rule || "-"}</span>
     </button>
   );
-}
+});
 
 function CostCard({ counts }: { counts: DashboardSnapshot["counts"] }) {
   const view = projectCostView(counts);
@@ -402,13 +413,15 @@ function ApprovalItem({ event }: { event: DashboardEvent }) {
   );
 }
 
-function SessionLine({ session, now }: { session: DashboardSession; now: number }) {
+function SessionLine({ session }: { session: DashboardSession }) {
   const state =
-    session.status === "active"
-      ? "Active"
-      : session.status === "idle"
-        ? `Idle · ${relativeTime(session.lastActivity, now).toLowerCase()}`
-        : `Ended · ${relativeTime(session.lastActivity, now).toLowerCase()}`;
+    session.status === "active" ? (
+      "Active"
+    ) : (
+      <>
+        {session.status === "idle" ? "Idle" : "Ended"} · <Ago time={session.lastActivity} />
+      </>
+    );
   return (
     <div className="ov-session">
       <span className="ov-session-name">{agentLabel(session.agent)}</span>
@@ -515,6 +528,42 @@ function Payload({ label, value }: { label: string; value: unknown }) {
       <pre className="ov-pre">{typeof value === "string" ? value : JSON.stringify(value, null, 2)}</pre>
     </div>
   );
+}
+
+/** The current time, re-read every `period` ms, so only the component showing a ticking time re-renders. */
+export function useNow(period: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), period);
+    return () => clearInterval(timer);
+  }, [period]);
+  return now;
+}
+
+/** "5s ago" style text for a time, ticking every second on its own. */
+export function Ago({ time }: { time: number }) {
+  const now = useNow(1000);
+  return <>{relativeTime(time, now).toLowerCase()}</>;
+}
+
+/**
+ * The time the 15-minute window (D-6) is measured at: re-read when new approvals arrive and when the next request
+ * leaves the window, so "Needs you" drops a request on time without a clock re-rendering the page every second.
+ */
+function useWindowNow(approvals: ApprovalWindow): number {
+  const [state, setState] = useState(() => ({ approvals, now: Date.now() }));
+  let now = state.now;
+  if (state.approvals !== approvals) {
+    now = Date.now();
+    setState({ approvals, now });
+  }
+  useEffect(() => {
+    const leaves = nextApprovalExpiry(approvals, now);
+    if (leaves === null) return;
+    const timer = setTimeout(() => setState({ approvals, now: Date.now() }), Math.max(0, leaves - Date.now()));
+    return () => clearTimeout(timer);
+  }, [approvals, now]);
+  return now;
 }
 
 function ruleName(event: DashboardEvent): string {

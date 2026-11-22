@@ -1,18 +1,23 @@
 "use client";
 
+import { useMemo } from "react";
 import {
   type DashboardEvent,
   type DashboardSnapshot,
   agentLabel,
   approvalRequests,
   eventTarget,
-  ranAfterwards,
+  ranAfterwardsIndex,
 } from "@/lib/events";
 import { PageHead, PartialNote } from "./page-parts";
 import { clock } from "./overview";
 
 export default function Waiting({ snapshot, now }: { snapshot: DashboardSnapshot; now: number }) {
-  const { recent, earlier, open } = approvalRequests(snapshot, now);
+  const { events, approvals } = snapshot;
+  const { recent, earlier, open } = useMemo(
+    () => approvalRequests({ events, approvals }, now),
+    [events, approvals, now],
+  );
   return (
     <>
       <PageHead
@@ -54,6 +59,7 @@ function RequestGroup({
   empty: string;
   markOpen?: boolean;
 }) {
+  const ranAfterwards = useMemo(() => ranAfterwardsIndex(events), [events]);
   return (
     <section className="pg-group" aria-label={title}>
       <h2>
@@ -63,7 +69,7 @@ function RequestGroup({
         {requests.length ? (
           <ul className="pg-reqs">
             {requests.map((request) => {
-              const ran = ranAfterwards(request, events);
+              const ran = ranAfterwards(request);
               return (
                 <li key={request.id} className={`pg-req ${markOpen && !ran ? "pg-req-open" : ""}`}>
                   <code className="pg-req-cmd">{eventTarget(request) || request.toolName}</code>
