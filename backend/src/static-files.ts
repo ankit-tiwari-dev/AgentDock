@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { extname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 
 /** Serving the Next.js static export (`frontend/out`) safely. */
 
@@ -21,6 +21,11 @@ const TYPES: Record<string, string> = {
 
 export function contentType(file: string): string {
   return TYPES[extname(file).toLowerCase()] ?? "application/octet-stream";
+}
+
+/** Next puts a content hash in every file name under `/_next/static/`, so those never change; everything else is revalidated. */
+export function cacheControl(decodedPath: string): string {
+  return posix.normalize(decodedPath).startsWith("/_next/static/") ? "public, max-age=31536000, immutable" : "no-cache";
 }
 
 /** The decoded path, or undefined when it is not a valid percent-encoding or holds a NUL byte. */
@@ -78,7 +83,6 @@ export function inlineScripts(html: string): string[] {
 
 /**
  * The page may run its own files and the inline scripts it shipped with, and talk only to this backend.
- * The two Google Fonts hosts are the stylesheet's font import.
  */
 export function contentSecurityPolicy(html: string, port: number): string {
   const hashes = [...new Set(inlineScripts(html))].map(
@@ -89,8 +93,8 @@ export function contentSecurityPolicy(html: string, port: number): string {
   return [
     "default-src 'self'",
     `script-src 'self' ${hashes.join(" ")}`.trim(),
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "font-src 'self' https://fonts.gstatic.com",
+    "style-src 'self' 'unsafe-inline'",
+    "font-src 'self'",
     "img-src 'self' data:",
     `connect-src 'self' ${sockets.join(" ")}`,
     "object-src 'none'",
