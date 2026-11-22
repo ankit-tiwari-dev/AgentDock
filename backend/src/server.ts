@@ -171,7 +171,7 @@ export class AgentDockBackendServer {
     this.server.on("upgrade", (req: IncomingMessage, socket: Socket) => {
       const pathname = new URL(req.url || "/", "http://localhost").pathname;
       const knownPath = pathname === "/ws/events" || pathname === "/ws";
-      if (knownPath && this.isAllowedHost(req.headers.host) && this.isAllowedOrigin(req.headers.origin)) {
+      if (knownPath && this.isAllowedHost(req.headers.host) && this.isAllowedBrowserSource(req)) {
         this.broadcaster.handleUpgrade(req, socket);
       } else {
         socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
@@ -264,6 +264,21 @@ export class AgentDockBackendServer {
     );
   }
 
+  /** A cross-site GET (an image, a no-cors fetch) carries no Origin, so only the browser's Sec-Fetch-Site gives it away. */
+  private isAllowedBrowserSource(req: IncomingMessage): boolean {
+    const origin = req.headers.origin;
+    if (this.devOrigin !== undefined && origin?.toLowerCase() === this.devOrigin) return true;
+    if (!this.isAllowedOrigin(origin)) return false;
+    const site = req.headers["sec-fetch-site"];
+    return site !== "cross-site" && site !== "same-site";
+  }
+
+  /** A link from another site may open a dashboard page, which only reads static files and cannot be read back. */
+  private isPageNavigation(req: IncomingMessage): boolean {
+    const pathname = new URL(req.url || "/", "http://localhost").pathname;
+    return req.method === "GET" && req.headers["sec-fetch-mode"] === "navigate" && !pathname.startsWith("/api/");
+  }
+
   public handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
     // 1. Only this machine and the dashboard's own page may call the API. There are no CORS headers on purpose:
     // without them a browser stops other sites from reading any response.
@@ -277,6 +292,10 @@ export class AgentDockBackendServer {
       res.setHeader("Access-Control-Allow-Origin", this.devOrigin!);
       res.setHeader("Vary", "Origin");
     }
+    if (!this.isAllowedBrowserSource(req) && !this.isPageNavigation(req)) {
+      this.sendJson(res, 403, { error: "Forbidden origin" });
+      return;
+    }
     if (req.method === "OPTIONS") {
       if (!fromDevServer) {
         this.sendJson(res, 403, { error: "Forbidden origin" });
@@ -289,10 +308,6 @@ export class AgentDockBackendServer {
       return;
     }
     if (req.method === "POST") {
-      if (!this.isAllowedOrigin(req.headers.origin)) {
-        this.sendJson(res, 403, { error: "Forbidden origin" });
-        return;
-      }
       // A cross-site page can send text/plain without asking first, but not application/json.
       const contentType = (req.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
       if (contentType !== "application/json") {
@@ -552,7 +567,7 @@ export class AgentDockBackendServer {
     };
   }
 
-  /** User-scope routes, so no `?project=`. POST already passed the Origin and Content-Type checks above. */
+  /** User-scope routes, so no `?project=`. Every request already passed the Origin check, and POST the Content-Type check, above. */
   private handleSettings(req: IncomingMessage, res: ServerResponse, pathname: string, url: URL): void {
     const reply = (work: Promise<{ status: number; body: unknown }>) =>
       void work
