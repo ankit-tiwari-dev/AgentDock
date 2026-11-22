@@ -23,6 +23,7 @@
     "check:floor": "node scripts/floor-guard.ts",
     "check:coverage": "npm run --silent test:coverage && node scripts/warn-window.ts 2026-12-05 scripts/coverage-gate.ts coverage/lcov.info",
     "check:arch": "node scripts/warn-window.ts 2026-12-05 node_modules/dependency-cruiser/bin/dependency-cruiser.mjs backend/src frontend/src extension/src --config .dependency-cruiser.mjs --output-type err",
+    "check:cli-copies": "node scripts/warn-window.ts 2026-12-05 scripts/cli-copies.ts",
     "check:pages": "node scripts/warn-window.ts 2026-12-05 scripts/page-check.ts --check",
     "check:task": "node scripts/agent-check.ts task"
   },

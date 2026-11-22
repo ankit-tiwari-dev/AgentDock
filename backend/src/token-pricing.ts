@@ -1,4 +1,4 @@
-// Copied from agentdock-cli packages/core/src/token-pricing.ts at commit 469ae10. Change it there, then copy it again.
+// Copied from agentdock-cli packages/core/src/token-pricing.ts at commit 5ef99bb. Update it with node scripts/cli-copies.ts --sync, never by hand.
 
 export interface ModelPricing {
   inputPerMTok: number;
@@ -62,6 +62,16 @@ export const MODEL_PRICING_CATALOG: Record<string, ModelPricing> = {
 
 const PROVIDER_PREFIXES = ["anthropic/", "google/", "openai/"];
 
+/**
+ * `name` cut at its first `@` that has no line break after it, as `.replace(/@.*$/, "")` does. Done by hand
+ * because that regex retries from every `@` and is quadratic on many of them before a line break.
+ */
+function withoutAtSuffix(name: string): string {
+  const lastBreak = Math.max(...["\n", "\r", "\u2028", "\u2029"].map((c) => name.lastIndexOf(c)));
+  const at = name.indexOf("@", lastBreak + 1);
+  return at === -1 ? name : name.slice(0, at);
+}
+
 export function normalizeModelName(modelName: string): string {
   let lowered = modelName.trim().toLowerCase();
   for (const prefix of PROVIDER_PREFIXES) {
@@ -70,14 +80,10 @@ export function normalizeModelName(modelName: string): string {
       break;
     }
   }
-  return (
-    lowered
-      // Bedrock: `us.anthropic.claude-opus-4-5-20251101-v1:0` (optional region, vendor, version suffix).
-      .replace(/^(?:[a-z-]+\.)?anthropic\./, "")
-      .replace(/-v\d+:\d+$/, "")
-      // Vertex: `claude-opus-4-5@20251101`.
-      .replace(/@.*$/, "")
-  );
+  // Bedrock: `us.anthropic.claude-opus-4-5-20251101-v1:0` (optional region, vendor, version suffix).
+  const bedrock = lowered.replace(/^(?:[a-z-]+\.)?anthropic\./, "").replace(/-v\d+:\d+$/, "");
+  // Vertex: `claude-opus-4-5@20251101`.
+  return withoutAtSuffix(bedrock);
 }
 
 /** The catalog id a model name prices as, or undefined when the model is not in the catalog. */

@@ -40,6 +40,7 @@ constraints:
 	npm run check:floor
 	npm run check:coverage
 	npm run check:arch
+	npm run check:cli-copies
 	npm run check:pages
 
 docker-smoke:

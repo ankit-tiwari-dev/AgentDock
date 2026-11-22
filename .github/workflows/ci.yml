@@ -82,6 +82,14 @@ jobs:
       - run: npm run check:floor
       - run: npm run check:coverage
       - run: npm run check:arch
+      - name: check out agentdock-cli for the copied-file check
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ankit-tiwari-dev/agentdock-cli
+          ref: main
+          path: agentdock-cli
+          persist-credentials: false
+      - run: npm run check:cli-copies -- --cli agentdock-cli
       - name: build the dashboard for the page check
         run: npm run build
         env:
