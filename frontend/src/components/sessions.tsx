@@ -1,17 +1,15 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type DashboardEvent,
   type DashboardSession,
   type DashboardSnapshot,
   type PublicEvent,
+  type StripMark,
   agentLabel,
-  eventStatus,
-  ranAfterwards,
   relativeTime,
-  sessionTimeline,
-  verdictStrip,
+  sessionSummaries,
 } from "@/lib/events";
 import { type CostView, ESTIMATED_SESSION, costView } from "@/lib/cost";
 import {
@@ -48,7 +46,12 @@ export default function Sessions({
   const shown =
     picked ?? (sessions[0] ? { id: sessions[0].id, agent: sessions[0].agent, start: null, hitId: null } : null);
 
-  useEffect(() => setPicked(null), [projectId]);
+  // One pass over the events per snapshot, not one per listed session on every clock tick.
+  const summaries = useMemo(() => sessionSummaries(snapshot.events), [snapshot.events]);
+  const pick = useCallback((session: DashboardSession) => {
+    setPicked({ id: session.id, agent: session.agent, start: null, hitId: null });
+    revealOnPhone(detail.current);
+  }, []);
 
   // After a search result opens a session, its detail sits under the results: bring it and its heading to the user.
   // This runs after the new detail has rendered; focusing before would land on the panel being replaced.
@@ -83,21 +86,22 @@ export default function Sessions({
             <div className="pg-box">
               <StripLegend />
               <ul className="pg-picks" aria-label="Agent sessions">
-                {sessions.map((session) => (
-                  <li key={session.id}>
-                    <SessionPick
-                      session={session}
-                      events={snapshot.events}
-                      usageRecorded={snapshot.counts.usageRecorded}
-                      now={now}
-                      current={session.id === shown?.id}
-                      onPick={() => {
-                        setPicked({ id: session.id, agent: session.agent, start: null, hitId: null });
-                        revealOnPhone(detail.current);
-                      }}
-                    />
-                  </li>
-                ))}
+                {sessions.map((session) => {
+                  const summary = summaries.get(session.id);
+                  return (
+                    <li key={session.id}>
+                      <SessionPick
+                        session={session}
+                        waiting={summary?.waiting ?? 0}
+                        marks={summary?.marks ?? NO_MARKS}
+                        usageRecorded={snapshot.counts.usageRecorded}
+                        now={now}
+                        current={session.id === shown?.id}
+                        onPick={pick}
+                      />
+                    </li>
+                  );
+                })}
               </ul>
             </div>
             {shown && (
@@ -122,28 +126,33 @@ export default function Sessions({
   );
 }
 
-function SessionPick({
+const NO_MARKS: StripMark[] = [];
+
+const SessionPick = memo(function SessionPick({
   session,
-  events,
+  waiting,
+  marks,
   usageRecorded,
   now,
   current,
   onPick,
 }: {
   session: DashboardSession;
-  events: DashboardEvent[];
+  waiting: number;
+  marks: StripMark[];
   usageRecorded: boolean;
   now: number;
   current: boolean;
-  onPick: () => void;
+  onPick: (session: DashboardSession) => void;
 }) {
-  const timeline = sessionTimeline(events, session.id);
-  const waiting = timeline.filter(
-    (event) => eventStatus(event) === "Needs approval" && !ranAfterwards(event, events),
-  ).length;
   const cost = costView(session, usageRecorded);
   return (
-    <button type="button" className="pg-pick" aria-current={current ? "true" : undefined} onClick={onPick}>
+    <button
+      type="button"
+      className="pg-pick"
+      aria-current={current ? "true" : undefined}
+      onClick={() => onPick(session)}
+    >
       <span className="pg-pick-top">
         <strong>{agentLabel(session.agent)}</strong>
         <SessionState session={session} now={now} />
@@ -161,10 +170,10 @@ function SessionPick({
         {cost.kind === "recorded" ? cost.listText : cost.text}
         {cost.kind === "recorded" && cost.estimated && <EstimatedMark note={ESTIMATED_SESSION} />}
       </span>
-      <VerdictStrip marks={verdictStrip(timeline)} />
+      <VerdictStrip marks={marks} />
     </button>
   );
-}
+});
 
 function SessionState({ session, now }: { session: DashboardSession; now: number }) {
   const label =

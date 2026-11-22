@@ -32,6 +32,8 @@ function exportDir() {
     `<!DOCTYPE html><html><head><script src="/_next/app.js"></script></head><body><script>${INLINE}</script></body></html>`,
   );
   writeFileSync(join(dir, "_next", "app.js"), "console.log(1)");
+  mkdirSync(join(dir, "_next", "static", "media"), { recursive: true });
+  writeFileSync(join(dir, "_next", "static", "media", "font.0a1b2c.woff2"), "wOF2");
   return dir;
 }
 
@@ -79,6 +81,28 @@ test("the dashboard page is served with a policy that only runs its own scripts"
     const script = await get(port, "/_next/app.js");
     assert.equal(script.status, 200);
     assert.match(String(script.headers["content-type"]), /javascript/);
+  });
+});
+
+test("regression: the page's policy names no host other than this backend", async () => {
+  await withServer(async (port) => {
+    const csp = String((await get(port, "/")).headers["content-security-policy"]);
+    assert.equal(/https?:\/\//.test(csp), false, csp);
+    assert.match(csp, /style-src 'self' 'unsafe-inline'(;|$)/);
+    assert.match(csp, /font-src 'self'(;|$)/);
+  });
+});
+
+test("regression: hashed build files are cached for a year and everything else is revalidated", async () => {
+  await withServer(async (port) => {
+    const font = await get(port, "/_next/static/media/font.0a1b2c.woff2");
+    assert.equal(font.status, 200);
+    assert.equal(font.headers["cache-control"], "public, max-age=31536000, immutable");
+    for (const path of ["/", "/_next/app.js", "/_next/static/%2e%2e/app.js"]) {
+      const res = await get(port, path);
+      assert.equal(res.status, 200, path);
+      assert.equal(res.headers["cache-control"], "no-cache", path);
+    }
   });
 });
 

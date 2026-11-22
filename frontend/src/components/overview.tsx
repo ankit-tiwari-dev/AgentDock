@@ -1,7 +1,8 @@
 "use client";
 
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, memo, useEffect, useMemo, useRef, useState } from "react";
 import {
+  type ApprovalWindow,
   type DashboardEvent,
   type DashboardSession,
   type DashboardSnapshot,
@@ -11,16 +12,16 @@ import {
   eventTarget,
   filterStream,
   newlyArrived,
+  nextApprovalExpiry,
   projectName,
   approvalRequests,
-  recentApprovalRequests,
   relativeTime,
   statusTone,
   streamCounts,
   unseenEvents,
 } from "@/lib/events";
 import { ESTIMATED_PROJECT, projectCostView } from "@/lib/cost";
-import { EstimatedMark } from "./page-parts";
+import { EstimatedMark, LoadingBox, snapshotLoaded } from "./page-parts";
 
 export const SETUP_COMMAND = "ctrlplane init --agent all";
 const STREAM_ROWS = 50;
@@ -40,21 +41,15 @@ export default function Overview({ snapshot, connected, backendReachable, checke
   const [query, setQuery] = useState("");
   const [frozen, setFrozen] = useState<DashboardEvent[] | null>(null);
   const [selected, setSelected] = useState<DashboardEvent | null>(null);
-  const [now, setNow] = useState(() => Date.now());
   const [fresh, setFresh] = useState<Set<string>>(() => new Set());
   const seen = useRef<Set<string> | null>(null);
   const freshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const searchRef = useRef<HTMLInputElement>(null);
   const needsRef = useRef<HTMLElement>(null);
 
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
   const paused = frozen !== null;
   const shown = frozen ?? snapshot.events;
-  const queued = paused ? unseenEvents(snapshot.events, frozen) : [];
+  const queued = useMemo(() => (frozen ? unseenEvents(snapshot.events, frozen) : []), [snapshot.events, frozen]);
 
   useEffect(() => {
     const added = newlyArrived(seen.current, shown);
@@ -70,21 +65,31 @@ export default function Overview({ snapshot, connected, backendReachable, checke
 
   const counts = useMemo(() => streamCounts(shown), [shown]);
   const visible = useMemo(() => filterStream(shown, filter, query), [shown, filter, query]);
-  const asked = recentApprovalRequests(snapshot.approvals, now);
-  const waiting = approvalRequests(snapshot, now).waiting;
+  const { events, approvals } = snapshot;
+  const windowNow = useWindowNow(approvals);
+  const { recent: asked, waiting } = useMemo(
+    () => approvalRequests({ events, approvals }, windowNow),
+    [events, approvals, windowNow],
+  );
   const activeSessions = snapshot.sessions.filter((session) => session.status === "active");
   const latest = snapshot.events[0];
   const empty = checked && backendReachable && snapshot.events.length === 0;
+  const loaded = snapshotLoaded(snapshot);
 
   let liveState = "Connecting";
-  let lastEvent = "";
+  let lastEvent: ReactNode = null;
   let liveTone = "ov-live-off";
   if (checked && !backendReachable) {
     liveState = "Offline · reconnecting";
     liveTone = "ov-live-down";
   } else if (connected) {
     liveState = paused ? "Paused" : "Live";
-    lastEvent = latest ? ` · last event ${relativeTime(latest.timestamp, now).toLowerCase()}` : "";
+    lastEvent = latest ? (
+      <>
+        {" "}
+        · last event <Ago time={latest.timestamp} />
+      </>
+    ) : null;
     liveTone = paused ? "ov-live-off" : "";
   }
 
@@ -132,7 +137,6 @@ export default function Overview({ snapshot, connected, backendReachable, checke
         <button
           type="button"
           className="ov-card ov-card-button"
-          aria-label={`Blocked: ${snapshot.counts.blockedCalls}. Show blocked calls`}
           onClick={() => {
             setFilter("Blocked");
             searchRef.current?.focus();
@@ -141,11 +145,12 @@ export default function Overview({ snapshot, connected, backendReachable, checke
           <span className="ov-k">Blocked</span>
           <span className="ov-v ov-v-blocked">{snapshot.counts.blockedCalls.toLocaleString()}</span>
           <span className="ov-k">stopped by your rules</span>
+          {/* The visible text names the button (WCAG 2.5.3); the action follows it for a screen reader. */}
+          <span className="sr-only">. Show blocked calls</span>
         </button>
         <button
           type="button"
           className="ov-card ov-card-button ov-card-warn"
-          aria-label={`Asked for approval: ${snapshot.counts.reviewCalls}. Show approval requests`}
           onClick={() => {
             setFilter("Needs approval");
             needsRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -154,6 +159,7 @@ export default function Overview({ snapshot, connected, backendReachable, checke
           <span className="ov-k">Asked for approval</span>
           <span className="ov-v ov-v-ask">{snapshot.counts.reviewCalls.toLocaleString()}</span>
           <span className="ov-k">{asked.length} in the last 15 minutes</span>
+          <span className="sr-only">. Show approval requests</span>
         </button>
         <div className="ov-card">
           <span className="ov-k">Active sessions</span>
@@ -164,144 +170,147 @@ export default function Overview({ snapshot, connected, backendReachable, checke
               : "No agent running"}
           </span>
         </div>
-        <CostCard counts={snapshot.counts} />
+        <CostCard counts={snapshot.counts} loaded={loaded} />
       </section>
 
-      <div className="ov-columns">
-        <section className="ov-panel ov-stream" aria-labelledby="ov-stream-title">
-          <div className="ov-panel-head">
-            <h2 id="ov-stream-title">Live stream</h2>
-            <div className="ov-pills" role="group" aria-label="Filter by verdict">
-              <FilterPill label="All" count={counts.all} active={filter === "all"} onClick={() => setFilter("all")} />
-              <FilterPill
-                label="Blocked"
-                count={counts.blocked}
-                active={filter === "Blocked"}
-                onClick={() => setFilter("Blocked")}
-              />
-              <FilterPill
-                label="Needs approval"
-                count={counts.approval}
-                active={filter === "Needs approval"}
-                onClick={() => setFilter("Needs approval")}
-              />
-            </div>
-            <label className="ov-search">
-              <SearchIcon />
-              <span className="ov-sr">Search commands, files and rules</span>
-              <input
-                ref={searchRef}
-                type="search"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search commands, files, rules"
-              />
-            </label>
-          </div>
-
-          <div aria-live="polite">
-            {queued.length > 0 && (
-              <div className="ov-queued">
-                <button type="button" onClick={() => setFrozen(snapshot.events)}>
-                  {queued.length} new event{queued.length === 1 ? "" : "s"}. Show them
-                </button>
+      {/* Both columns grow when the first snapshot arrives; one box until then means nothing already shown moves. */}
+      {!loaded ? (
+        <LoadingBox what="the audit log" />
+      ) : (
+        <div className="ov-columns">
+          <section className="ov-panel ov-stream" aria-labelledby="ov-stream-title">
+            <div className="ov-panel-head">
+              <h2 id="ov-stream-title">Live stream</h2>
+              <div className="ov-pills" role="group" aria-label="Filter by verdict">
+                <FilterPill label="All" count={counts.all} active={filter === "all"} onClick={() => setFilter("all")} />
+                <FilterPill
+                  label="Blocked"
+                  count={counts.blocked}
+                  active={filter === "Blocked"}
+                  onClick={() => setFilter("Blocked")}
+                />
+                <FilterPill
+                  label="Needs approval"
+                  count={counts.approval}
+                  active={filter === "Needs approval"}
+                  onClick={() => setFilter("Needs approval")}
+                />
               </div>
-            )}
-          </div>
+              <label className="ov-search">
+                <SearchIcon />
+                <span className="ov-sr">Search commands, files and rules</span>
+                <input
+                  ref={searchRef}
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search commands, files, rules"
+                />
+              </label>
+            </div>
 
-          {empty ? (
-            <div className="ov-empty">
-              <h3>No agent activity yet</h3>
-              <p>Set up the hooks in your project, then start an agent. Each tool call it makes shows up here.</p>
-              <span className="ov-codeline">
-                <code>{SETUP_COMMAND}</code>
+            <div aria-live="polite">
+              {queued.length > 0 && (
+                <div className="ov-queued">
+                  <button type="button" onClick={() => setFrozen(snapshot.events)}>
+                    {queued.length} new event{queued.length === 1 ? "" : "s"}. Show them
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {empty ? (
+              <div className="ov-empty">
+                <h3>No agent activity yet</h3>
+                <p>Set up the hooks in your project, then start an agent. Each tool call it makes shows up here.</p>
+                <span className="ov-codeline">
+                  <code>{SETUP_COMMAND}</code>
+                  <button
+                    type="button"
+                    className="ov-btn ov-btn-sm"
+                    onClick={() => onCopy(SETUP_COMMAND, "Setup command")}
+                  >
+                    Copy
+                  </button>
+                </span>
+              </div>
+            ) : visible.length === 0 && shown.length > 0 ? (
+              <div className="ov-empty">
+                <h3>Nothing matches</h3>
+                <p>No events match this filter{query.trim() ? " and search" : ""}.</p>
                 <button
                   type="button"
                   className="ov-btn ov-btn-sm"
-                  onClick={() => onCopy(SETUP_COMMAND, "Setup command")}
+                  onClick={() => {
+                    setQuery("");
+                    setFilter("all");
+                  }}
                 >
-                  Copy
+                  Clear filters
                 </button>
-              </span>
-            </div>
-          ) : visible.length === 0 && shown.length > 0 ? (
-            <div className="ov-empty">
-              <h3>Nothing matches</h3>
-              <p>No events match this filter{query.trim() ? " and search" : ""}.</p>
-              <button
-                type="button"
-                className="ov-btn ov-btn-sm"
-                onClick={() => {
-                  setQuery("");
-                  setFilter("all");
-                }}
-              >
-                Clear filters
-              </button>
-            </div>
-          ) : (
-            <div className="ov-table" role="region" aria-label="Events" tabIndex={0}>
-              <div className="ov-row ov-row-head" aria-hidden="true">
-                <span>Time</span>
-                <span>Agent</span>
-                <span>Action</span>
-                <span>Verdict</span>
-                <span>Rule</span>
               </div>
-              <ul>
-                {(showAll ? visible : visible.slice(0, STREAM_ROWS)).map((event) => (
-                  <li key={event.id}>
-                    <StreamRow event={event} fresh={fresh.has(event.id)} onOpen={() => setSelected(event)} />
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {visible.length > STREAM_ROWS && (
-            <div className="ov-stream-foot">
-              {showAll ? `Showing all ${visible.length}.` : `Showing the newest ${STREAM_ROWS} of ${visible.length}.`}{" "}
-              <button type="button" className="ov-link" onClick={() => setShowAll(!showAll)}>
-                {showAll ? `Show the newest ${STREAM_ROWS}` : `Show all ${visible.length}`}
-              </button>
-            </div>
-          )}
-        </section>
-
-        <div className="ov-rail">
-          <section ref={needsRef} className="ov-panel ov-needs" aria-labelledby="ov-needs-title">
-            <h2 id="ov-needs-title">Needs you</h2>
-            {waiting.length ? (
-              <>
-                {waiting.slice(0, NEEDS_SHOWN).map((event) => (
-                  <ApprovalItem key={event.id} event={event} />
-                ))}
-                {waiting.length > NEEDS_SHOWN && (
-                  <a className="ov-btn ov-btn-sm" href="#waiting">
-                    {waiting.length - NEEDS_SHOWN} more waiting. See them all
-                  </a>
-                )}
-              </>
             ) : (
-              <p className="ov-needs-text">
-                Nothing is waiting for you. When an agent asks before a risky change, it shows up here with what it
-                wants and why.
-              </p>
+              <div className="ov-table" role="region" aria-label="Events" tabIndex={0}>
+                <div className="ov-row ov-row-head" aria-hidden="true">
+                  <span>Time</span>
+                  <span>Agent</span>
+                  <span>Action</span>
+                  <span>Verdict</span>
+                  <span>Rule</span>
+                </div>
+                <ul>
+                  {(showAll ? visible : visible.slice(0, STREAM_ROWS)).map((event) => (
+                    <li key={event.id}>
+                      <StreamRow event={event} fresh={fresh.has(event.id)} onOpen={setSelected} />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {visible.length > STREAM_ROWS && (
+              <div className="ov-stream-foot">
+                {showAll ? `Showing all ${visible.length}.` : `Showing the newest ${STREAM_ROWS} of ${visible.length}.`}{" "}
+                <button type="button" className="ov-link" onClick={() => setShowAll(!showAll)}>
+                  {showAll ? `Show the newest ${STREAM_ROWS}` : `Show all ${visible.length}`}
+                </button>
+              </div>
             )}
           </section>
 
-          <section className="ov-panel" aria-labelledby="ov-sessions-title">
-            <h2 id="ov-sessions-title">Sessions</h2>
-            {snapshot.sessions.length ? (
-              snapshot.sessions
-                .slice(0, 5)
-                .map((session) => <SessionLine key={session.id} session={session} now={now} />)
-            ) : (
-              <p className="ov-muted">No sessions recorded yet.</p>
-            )}
-          </section>
+          <div className="ov-rail">
+            <section ref={needsRef} className="ov-panel ov-needs" aria-labelledby="ov-needs-title">
+              <h2 id="ov-needs-title">Needs you</h2>
+              {waiting.length ? (
+                <>
+                  {waiting.slice(0, NEEDS_SHOWN).map((event) => (
+                    <ApprovalItem key={event.id} event={event} />
+                  ))}
+                  {waiting.length > NEEDS_SHOWN && (
+                    <a className="ov-btn ov-btn-sm" href="#waiting">
+                      {waiting.length - NEEDS_SHOWN} more waiting. See them all
+                    </a>
+                  )}
+                </>
+              ) : (
+                <p className="ov-needs-text">
+                  Nothing is waiting for you. When an agent asks before a risky change, it shows up here with what it
+                  wants and why.
+                </p>
+              )}
+            </section>
+
+            <section className="ov-panel" aria-labelledby="ov-sessions-title">
+              <h2 id="ov-sessions-title">Sessions</h2>
+              {snapshot.sessions.length ? (
+                snapshot.sessions.slice(0, 5).map((session) => <SessionLine key={session.id} session={session} />)
+              ) : (
+                <p className="ov-muted">No sessions recorded yet.</p>
+              )}
+            </section>
+          </div>
         </div>
-      </div>
+      )}
 
       <EventDetail
         event={selected}
@@ -330,18 +339,22 @@ function FilterPill({
   );
 }
 
-function StreamRow({ event, fresh, onOpen }: { event: DashboardEvent; fresh: boolean; onOpen: () => void }) {
+// Memoized so a refresh or a filter change re-renders only the rows whose event or highlight changed.
+const StreamRow = memo(function StreamRow({
+  event,
+  fresh,
+  onOpen,
+}: {
+  event: DashboardEvent;
+  fresh: boolean;
+  onOpen: (event: DashboardEvent) => void;
+}) {
   const status = eventStatus(event);
   const action = event.toolName || event.hookEventName;
   const target = eventTarget(event);
   const rule = ruleName(event);
   return (
-    <button
-      type="button"
-      className={`ov-row ${fresh ? "ov-fresh" : ""}`}
-      onClick={onOpen}
-      aria-label={`${agentLabel(event.agent)} ${action} ${target}, ${status}${rule ? `, rule ${rule}` : ""}. Open details`}
-    >
+    <button type="button" className={`ov-row ${fresh ? "ov-fresh" : ""}`} onClick={() => onOpen(event)}>
       <span className="ov-mono ov-muted">{clock(event.timestamp)}</span>
       <span>{agentLabel(event.agent)}</span>
       <span className="ov-action">
@@ -351,16 +364,23 @@ function StreamRow({ event, fresh, onOpen }: { event: DashboardEvent; fresh: boo
         <StatusChip status={status} />
       </span>
       <span className="ov-mono ov-rule">{rule || "-"}</span>
+      <span className="sr-only">. Open details</span>
     </button>
   );
-}
+});
 
-function CostCard({ counts }: { counts: DashboardSnapshot["counts"] }) {
+function CostCard({ counts, loaded }: { counts: DashboardSnapshot["counts"]; loaded: boolean }) {
   const view = projectCostView(counts);
   return (
     <div className="ov-card">
       <span className="ov-k">Cost (Claude Code)</span>
-      {view.kind === "recorded" ? (
+      {/* Before the first snapshot it keeps the recorded layout; the taller "none" help text would shrink the row. */}
+      {!loaded ? (
+        <>
+          <span className="ov-v">–</span>
+          <span className="ov-k">Loading</span>
+        </>
+      ) : view.kind === "recorded" ? (
         <>
           <span className="ov-v">{view.costText}</span>
           <span className="ov-k">
@@ -402,13 +422,15 @@ function ApprovalItem({ event }: { event: DashboardEvent }) {
   );
 }
 
-function SessionLine({ session, now }: { session: DashboardSession; now: number }) {
+function SessionLine({ session }: { session: DashboardSession }) {
   const state =
-    session.status === "active"
-      ? "Active"
-      : session.status === "idle"
-        ? `Idle · ${relativeTime(session.lastActivity, now).toLowerCase()}`
-        : `Ended · ${relativeTime(session.lastActivity, now).toLowerCase()}`;
+    session.status === "active" ? (
+      "Active"
+    ) : (
+      <>
+        {session.status === "idle" ? "Idle" : "Ended"} · <Ago time={session.lastActivity} />
+      </>
+    );
   return (
     <div className="ov-session">
       <span className="ov-session-name">{agentLabel(session.agent)}</span>
@@ -515,6 +537,42 @@ function Payload({ label, value }: { label: string; value: unknown }) {
       <pre className="ov-pre">{typeof value === "string" ? value : JSON.stringify(value, null, 2)}</pre>
     </div>
   );
+}
+
+/** The current time, re-read every `period` ms, so only the component showing a ticking time re-renders. */
+export function useNow(period: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), period);
+    return () => clearInterval(timer);
+  }, [period]);
+  return now;
+}
+
+/** "5s ago" style text for a time, ticking every second on its own. */
+export function Ago({ time }: { time: number }) {
+  const now = useNow(1000);
+  return <>{relativeTime(time, now).toLowerCase()}</>;
+}
+
+/**
+ * The time the 15-minute window (D-6) is measured at: re-read when new approvals arrive and when the next request
+ * leaves the window, so "Needs you" drops a request on time without a clock re-rendering the page every second.
+ */
+function useWindowNow(approvals: ApprovalWindow): number {
+  const [state, setState] = useState(() => ({ approvals, now: Date.now() }));
+  let now = state.now;
+  if (state.approvals !== approvals) {
+    now = Date.now();
+    setState({ approvals, now });
+  }
+  useEffect(() => {
+    const leaves = nextApprovalExpiry(approvals, now);
+    if (leaves === null) return;
+    const timer = setTimeout(() => setState({ approvals, now: Date.now() }), Math.max(0, leaves - Date.now()));
+    return () => clearTimeout(timer);
+  }, [approvals, now]);
+  return now;
 }
 
 function ruleName(event: DashboardEvent): string {

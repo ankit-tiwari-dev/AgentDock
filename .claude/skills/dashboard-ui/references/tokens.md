@@ -46,7 +46,7 @@ A verdict colour means that verdict everywhere. Do not use the blocked pair for 
 | `--font-display` | page titles (same stack today)             |
 | `--font-mono`    | `code`, numbers on cards, times, ids       |
 
-Inter and JetBrains Mono come from the Google Fonts `@import` on the first line of the stylesheet. `ISSUE.md` → I-14 plans to bundle them or use system fonts. Do not add another font.
+Inter (400, 500, 600, 700) and JetBrains Mono (400, 500) are latin woff2 files in `frontend/src/app/fonts/`, loaded by the `@font-face` rules at the top of the stylesheet; their licence is `fonts/OFL.txt`. Do not add another font.
 
 ## Sizes in use
 

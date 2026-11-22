@@ -11,6 +11,20 @@ export function PageHead({ title, lede }: { title: string; lede: string }) {
   );
 }
 
+/** The backend always sends `source`, so a snapshot without one is the empty stand-in shown before its first answer. */
+export function snapshotLoaded(snapshot: DashboardSnapshot): boolean {
+  return snapshot.source !== undefined;
+}
+
+/** Stands in for a page's lists until the first snapshot; content that replaces it is new, so nothing on screen moves. */
+export function LoadingBox({ what }: { what: string }) {
+  return (
+    <div className="pg-box">
+      <p className="pg-empty">Loading {what}…</p>
+    </div>
+  );
+}
+
 /** The backend sends only the newest events, so pages built from them must say when older ones are missing. */
 export function PartialNote({ snapshot }: { snapshot: DashboardSnapshot }) {
   if (snapshot.events.length >= snapshot.counts.totalEvents) return null;

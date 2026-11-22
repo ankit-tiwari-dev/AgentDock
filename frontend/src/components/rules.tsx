@@ -1,8 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { type DashboardSnapshot, type RuleSummary, summarizeRules } from "@/lib/events";
-import { CommandLine, PageHead, PartialNote, revealOnPhone } from "./page-parts";
+import { CommandLine, LoadingBox, PageHead, PartialNote, revealOnPhone, snapshotLoaded } from "./page-parts";
 import { StatusChip, clock } from "./overview";
 import { Timeline } from "./timeline";
 
@@ -17,7 +17,7 @@ export default function Rules({
 }) {
   const [picked, setPicked] = useState<string | null>(null);
   const detail = useRef<HTMLElement>(null);
-  const rules = summarizeRules(snapshot.events);
+  const rules = useMemo(() => summarizeRules(snapshot.events), [snapshot.events]);
   const selected = rules.find((rule) => rule.id === picked) ?? rules[0];
 
   return (
@@ -27,7 +27,10 @@ export default function Rules({
         lede="The rules that stepped in during this project's sessions, and the calls they acted on."
       />
       <PartialNote snapshot={snapshot} />
-      {rules.length === 0 ? (
+      {/* The how-to waits for the first snapshot too: rendered under a placeholder, the list would push it down. */}
+      {!snapshotLoaded(snapshot) ? (
+        <LoadingBox what="rules" />
+      ) : rules.length === 0 ? (
         <div className="pg-box">
           <p className="pg-empty">
             No rule has acted yet. A rule shows up here once it blocks, guides or asks about a call.
@@ -73,19 +76,21 @@ export default function Rules({
           )}
         </div>
       )}
-      <section className="pg-box pg-howto" aria-labelledby="pg-howto-title">
-        <h2 id="pg-howto-title">Change a rule</h2>
-        <p>
-          Rules live in the CLI, so this page shows what they did and the CLI changes them. Run these from the project
-          folder.
-        </p>
-        <CommandLine label="See every rule" command="ctrlplane policies list" onCopy={onCopy} />
-        <CommandLine
-          label="Try a command"
-          command='ctrlplane policies test --command "git push origin main"'
-          onCopy={onCopy}
-        />
-      </section>
+      {snapshotLoaded(snapshot) && (
+        <section className="pg-box pg-howto" aria-labelledby="pg-howto-title">
+          <h2 id="pg-howto-title">Change a rule</h2>
+          <p>
+            Rules live in the CLI, so this page shows what they did and the CLI changes them. Run these from the project
+            folder.
+          </p>
+          <CommandLine label="See every rule" command="ctrlplane policies list" onCopy={onCopy} />
+          <CommandLine
+            label="Try a command"
+            command='ctrlplane policies test --command "git push origin main"'
+            onCopy={onCopy}
+          />
+        </section>
+      )}
     </>
   );
 }

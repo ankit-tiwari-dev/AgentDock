@@ -1,4 +1,46 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+/* Self-hosted so the page needs no outside host (CSP) and works offline; licence in fonts/OFL.txt. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/inter-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./fonts/inter-latin-500-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./fonts/inter-latin-600-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./fonts/inter-latin-700-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./fonts/jetbrains-mono-latin-500-normal.woff2") format("woff2");
+}
 
 :root {
   --bg: #0d1117;
@@ -647,9 +689,16 @@ button {
   overflow-x: auto;
 }
 .ov-table ul {
+  /* The rows are 700 px wide here; the list matches so a row's paint containment does not clip it. */
+  min-width: 700px;
   margin: 0;
   padding: 0;
   list-style: none;
+}
+/* "Show all" can list 500 rows; off-screen ones skip layout and paint until scrolled near. */
+.ov-table li {
+  content-visibility: auto;
+  contain-intrinsic-height: auto 45px;
 }
 .ov-row {
   display: grid;
@@ -669,6 +718,12 @@ button {
 .ov-row > span {
   min-width: 0;
   padding: 10px 8px 10px 0;
+}
+.ov-row > .sr-only {
+  padding: 0;
+}
+.ov-row:focus-visible {
+  outline-offset: -2px;
 }
 button.ov-row:hover {
   background: #18202a;
@@ -960,6 +1015,9 @@ button.ov-row:hover {
   .ov-row-head {
     display: none;
   }
+  .ov-table ul {
+    min-width: 0;
+  }
   .ov-row {
     grid-template-columns: minmax(0, 1fr) auto;
     min-width: 0;
@@ -1143,6 +1201,11 @@ button.ov-row:hover {
 .pg-picks li + li {
   border-top: 1px solid var(--line-soft);
 }
+/* The Sessions picker can hold 500 picks, each with a strip of up to 60 marks. */
+.pg-picks li {
+  content-visibility: auto;
+  contain-intrinsic-height: auto 100px;
+}
 .pg-pick {
   display: flex;
   flex-direction: column;
@@ -1273,6 +1336,10 @@ button.ov-row:hover {
 }
 .pg-tl li + li {
   border-top: 1px solid var(--line-soft);
+}
+.pg-tl li {
+  content-visibility: auto;
+  contain-intrinsic-height: auto 60px;
 }
 .pg-tl-row {
   display: grid;

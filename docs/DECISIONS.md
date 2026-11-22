@@ -155,3 +155,15 @@ The approval window D-6 names now lives in `backend/src/audit-reader.ts` and rea
 - The `Host` check stops browsers, not a client on the network, so a wildcard address outside Docker served the audit log and the write routes to the LAN (I-17).
 
 **Rules out:** opening a backend route from another site's page, and running the backend on a network address outside the container image.
+
+## D-14 · A `v*` tag publishes a signed image to GHCR
+
+**Decision:** pushing a tag `v*` runs `.github/workflows/release.yml`: every CI and security gate again, then a check that the tag equals `v` + the root `package.json` version, then an osv-scanner scan of the built image that blocks on any known vulnerability, then `ghcr.io/ankit-tiwari-dev/agentdock:<version>` and `:latest` with a BuildKit SBOM and provenance, a GitHub build-provenance attestation (`actions/attest-build-provenance`) and a GitHub Release whose notes give the image digest. The runtime stage of the `Dockerfile` runs `apk upgrade --no-cache` on top of the digest-pinned base.
+
+**Why:**
+
+- Without a published image every user built from source, and `docker run` could not name a version.
+- The attestation lets anyone prove with `gh attestation verify` that an image came from this workflow at the tagged commit; a digest alone only proves it did not change.
+- The lockfile scan in `security.yml` does not see the base image's Alpine packages. The pinned `node:24-alpine` shipped six known OpenSSL and zlib vulnerabilities, one critical, that Alpine had already fixed while the Node image had not been rebuilt (I-30). `apk upgrade` takes those fixes; the base digest still decides Node and everything else.
+
+**Rules out:** Docker Hub or any second registry; publishing without the scan or the attestation; a scan on every pull request (the release blocks instead, so no new merge check). The cost is that two builds of the same commit can differ in Alpine patch versions.

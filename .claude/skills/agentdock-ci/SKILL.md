@@ -27,6 +27,10 @@ make ci > ci.log 2>&1; echo "make ci rc=$?"
 | known vulnerabilities (OSV) (`security.yml`)                      | OSV scan of `package-lock.json`                  | `go run github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.7.0 scan source --config osv-scanner.toml --lockfile package-lock.json` |
 | secret scan (full history) (`security.yml`)                       | gitleaks over every commit                       | `go run github.com/zricethezav/gitleaks/v8@v8.30.1 git --redact --no-banner .`                                                      |
 
+## Releases
+
+Pushing a tag `v*` runs `release.yml`: the CI and security workflows again, a check that the tag equals `v` + the `version` in the root `package.json`, an osv-scanner scan of the built image that blocks on any known vulnerability, then the image pushed to `ghcr.io/ankit-tiwari-dev/agentdock` with an SBOM, provenance and an attestation, and a GitHub Release (D-14). Reproduce the scan with `docker build -t agentdock:release .` and `osv-scanner scan image --config osv-scanner.toml agentdock:release`. Bump the version in the same pull request, never re-push or move an existing tag, and only tag after the developer says yes.
+
 ## Six machines, one laptop
 
 The test job runs on Linux, Windows and macOS. A test that passes on your machine can still fail on another one when it depends on:

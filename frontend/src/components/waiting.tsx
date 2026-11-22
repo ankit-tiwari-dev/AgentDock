@@ -1,18 +1,24 @@
 "use client";
 
+import { useMemo } from "react";
 import {
   type DashboardEvent,
   type DashboardSnapshot,
   agentLabel,
   approvalRequests,
   eventTarget,
-  ranAfterwards,
+  ranAfterwardsIndex,
 } from "@/lib/events";
-import { PageHead, PartialNote } from "./page-parts";
+import { LoadingBox, PageHead, PartialNote, snapshotLoaded } from "./page-parts";
 import { clock } from "./overview";
 
 export default function Waiting({ snapshot, now }: { snapshot: DashboardSnapshot; now: number }) {
-  const { recent, earlier, open } = approvalRequests(snapshot, now);
+  const { events, approvals } = snapshot;
+  const { recent, earlier, open } = useMemo(
+    () => approvalRequests({ events, approvals }, now),
+    [events, approvals, now],
+  );
+  const loaded = snapshotLoaded(snapshot);
   return (
     <>
       <PageHead
@@ -20,21 +26,28 @@ export default function Waiting({ snapshot, now }: { snapshot: DashboardSnapshot
         lede="Every call an agent paused to ask you about. Answer in the agent's own window; this page shows what happened afterwards."
       />
       <PartialNote snapshot={snapshot} />
-      <RequestGroup
-        title="Last 15 minutes"
-        note={`${recent.length}, ${open} with no record ${open === 1 ? "it" : "they"} ran`}
-        requests={recent}
-        events={snapshot.approvals.events}
-        empty="Nothing has needed you in the last 15 minutes. When an agent asks before a risky change, it shows up here."
-        markOpen
-      />
-      <RequestGroup
-        title="Earlier"
-        note={String(earlier.length)}
-        requests={earlier}
-        events={snapshot.events}
-        empty="Nothing earlier."
-      />
+      {/* Earlier waits for the first snapshot: rendered under an empty first group, it would be pushed down. */}
+      {loaded ? (
+        <>
+          <RequestGroup
+            title="Last 15 minutes"
+            note={`${recent.length}, ${open} with no record ${open === 1 ? "it" : "they"} ran`}
+            requests={recent}
+            events={snapshot.approvals.events}
+            empty="Nothing has needed you in the last 15 minutes. When an agent asks before a risky change, it shows up here."
+            markOpen
+          />
+          <RequestGroup
+            title="Earlier"
+            note={String(earlier.length)}
+            requests={earlier}
+            events={snapshot.events}
+            empty="Nothing earlier."
+          />
+        </>
+      ) : (
+        <LoadingBox what="approval requests" />
+      )}
     </>
   );
 }
@@ -54,6 +67,7 @@ function RequestGroup({
   empty: string;
   markOpen?: boolean;
 }) {
+  const ranAfterwards = useMemo(() => ranAfterwardsIndex(events), [events]);
   return (
     <section className="pg-group" aria-label={title}>
       <h2>
@@ -63,7 +77,7 @@ function RequestGroup({
         {requests.length ? (
           <ul className="pg-reqs">
             {requests.map((request) => {
-              const ran = ranAfterwards(request, events);
+              const ran = ranAfterwards(request);
               return (
                 <li key={request.id} className={`pg-req ${markOpen && !ran ? "pg-req-open" : ""}`}>
                   <code className="pg-req-cmd">{eventTarget(request) || request.toolName}</code>
