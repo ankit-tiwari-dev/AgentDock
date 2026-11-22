@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  security:
+    uses: ./.github/workflows/security.yml
+    permissions:
+      contents: read
+      security-events: write
+
+  release:
+    name: publish image and GitHub Release
+    needs: [ci, security]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      packages: write
+      # id-token signs the provenance through Sigstore; attestations stores it on GitHub.
+      id-token: write
+      attestations: write
+    env:
+      IMAGE: ghcr.io/ankit-tiwari-dev/agentdock
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Tag must match package.json version
+        run: |
+          version="v$(node -p 'require("./package.json").version')"
+          if [ "$TAG" != "$version" ]; then
+            echo "::error::tag $TAG does not match package.json version $version"
+            exit 1
+          fi
+      - name: Build the image
+        run: |
+          docker buildx create --use --name release
+          docker buildx build --load -t agentdock:release .
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+          cache: false
+      - name: The image has no known vulnerability
+        run: go run github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.7.0 scan image --config osv-scanner.toml agentdock:release
+      - name: Push the image with its SBOM and BuildKit provenance
+        id: push
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          docker buildx build --push --sbom=true --provenance=mode=max \
+            -t "$IMAGE:${TAG#v}" -t "$IMAGE:latest" --metadata-file metadata.json .
+          echo "digest=$(node -p 'require("./metadata.json")["containerimage.digest"]')" >> "$GITHUB_OUTPUT"
+      - name: Attest the image's build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          version="${TAG#v}"
+          notes="Image: \`$IMAGE:$version@$DIGEST\`
+
+          Verify: \`gh attestation verify oci://$IMAGE:$version -R $GITHUB_REPOSITORY\`"
+          gh release create "$TAG" --verify-tag --generate-notes --notes "$notes" --title "$TAG"
