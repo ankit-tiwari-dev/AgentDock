@@ -60,7 +60,14 @@ export type DashboardSnapshot = {
     /** False when the CLI that wrote the audit log does not record cost. */
     usageRecorded: boolean;
   };
+  approvals: ApprovalWindow;
 };
+
+/**
+ * The backend reads the approval requests of the last `windowMs` (D-6) apart from the newest events, so a busy agent
+ * cannot push one out, with the later events "Ran afterwards" (D-7) compares them with.
+ */
+export type ApprovalWindow = { windowMs: number; events: DashboardEvent[] };
 
 /** An event from search or the session timeline. A large output is kept outside the database and not sent. */
 export type PublicEvent = DashboardEvent & {
@@ -166,9 +173,6 @@ export function statusTone(status: string): string {
 
 export type StreamFilter = "all" | "Blocked" | "Needs approval";
 
-/** The audit log does not record whether an approval was answered, so an older request is treated as no longer waiting. */
-export const APPROVAL_WINDOW_MS = 15 * 60 * 1000;
-
 const TARGET_KEYS = ["command", "file_path", "pattern", "path", "url", "query"];
 
 export function eventTarget(event: DashboardEvent): string {
@@ -214,9 +218,9 @@ export function filterStream(events: DashboardEvent[], filter: StreamFilter, que
   });
 }
 
-export function recentApprovalRequests(events: DashboardEvent[], now = Date.now()): DashboardEvent[] {
-  return events
-    .filter((event) => eventStatus(event) === "Needs approval" && now - event.timestamp <= APPROVAL_WINDOW_MS)
+export function recentApprovalRequests(approvals: ApprovalWindow, now = Date.now()): DashboardEvent[] {
+  return approvals.events
+    .filter((event) => eventStatus(event) === "Needs approval" && now - event.timestamp <= approvals.windowMs)
     .sort((a, b) => b.timestamp - a.timestamp);
 }
 
@@ -293,15 +297,16 @@ export function ranAfterwards(request: DashboardEvent, events: DashboardEvent[])
   );
 }
 
+/** Recent requests come from the snapshot's approvals; earlier ones are only those still among its newest events. */
 export function approvalRequests(
-  events: DashboardEvent[],
+  snapshot: Pick<DashboardSnapshot, "events" | "approvals">,
   now = Date.now(),
 ): { recent: DashboardEvent[]; earlier: DashboardEvent[]; waiting: DashboardEvent[]; open: number } {
-  const requests = events
-    .filter((event) => eventStatus(event) === "Needs approval")
+  const { windowMs, events } = snapshot.approvals;
+  const recent = recentApprovalRequests(snapshot.approvals, now);
+  const earlier = snapshot.events
+    .filter((event) => eventStatus(event) === "Needs approval" && now - event.timestamp > windowMs)
     .sort((a, b) => b.timestamp - a.timestamp);
-  const recent = requests.filter((event) => now - event.timestamp <= APPROVAL_WINDOW_MS);
-  const earlier = requests.filter((event) => now - event.timestamp > APPROVAL_WINDOW_MS);
   const waiting = recent.filter((event) => !ranAfterwards(event, events));
   return { recent, earlier, waiting, open: waiting.length };
 }

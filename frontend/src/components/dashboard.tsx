@@ -32,6 +32,7 @@ const EMPTY: DashboardSnapshot = {
     usage: null,
     usageRecorded: true,
   },
+  approvals: { windowMs: 0, events: [] },
 };
 const API_ORIGIN =
   process.env.NEXT_PUBLIC_BACKEND_API_ORIGIN ||
@@ -259,7 +260,7 @@ export default function Dashboard() {
     setPickedId(id);
   }
 
-  const open = approvalRequests(snapshot.events, now).open;
+  const open = approvalRequests(snapshot, now).open;
   const shownProject = projects.find((project) => project.id === shownId) ?? null;
 
   return (

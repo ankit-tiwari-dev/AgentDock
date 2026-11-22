@@ -70,8 +70,8 @@ export default function Overview({ snapshot, connected, backendReachable, checke
 
   const counts = useMemo(() => streamCounts(shown), [shown]);
   const visible = useMemo(() => filterStream(shown, filter, query), [shown, filter, query]);
-  const asked = recentApprovalRequests(snapshot.events, now);
-  const waiting = approvalRequests(snapshot.events, now).waiting;
+  const asked = recentApprovalRequests(snapshot.approvals, now);
+  const waiting = approvalRequests(snapshot, now).waiting;
   const activeSessions = snapshot.sessions.filter((session) => session.status === "active");
   const latest = snapshot.events[0];
   const empty = checked && backendReachable && snapshot.events.length === 0;

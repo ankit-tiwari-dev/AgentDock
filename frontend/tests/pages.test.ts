@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   type DashboardEvent,
-  APPROVAL_WINDOW_MS,
   approvalRequests,
   formatUptime,
   pageFromHash,
@@ -11,6 +10,10 @@ import {
   summarizeRules,
   verdictStrip,
 } from "../src/lib/events.ts";
+
+// The window the backend sends as `approvals.windowMs`.
+const APPROVAL_WINDOW_MS = 15 * 60 * 1000;
+const inWindow = (events: DashboardEvent[]) => ({ windowMs: APPROVAL_WINDOW_MS, events });
 
 const event = (id: string, over: Partial<DashboardEvent> = {}): DashboardEvent => ({
   id,
@@ -75,7 +78,8 @@ test("approval requests split at 15 minutes, and only unanswered recent ones cou
     ask("old", "gh pr merge 3", now - APPROVAL_WINDOW_MS - 1),
     event("allowed", { timestamp: now - 500 }),
   ];
-  const { recent, earlier, open } = approvalRequests(events, now);
+  const recentEvents = events.filter((e) => now - e.timestamp <= APPROVAL_WINDOW_MS);
+  const { recent, earlier, open } = approvalRequests({ events, approvals: inWindow(recentEvents) }, now);
   assert.deepEqual(
     recent.map((e) => e.id),
     ["recent-ran", "recent-open"],
@@ -95,7 +99,7 @@ test("regression: the Overview's waiting list leaves out requests that ran after
     ask("recent-open", "npm publish", now - 3_000),
   ];
   assert.deepEqual(
-    approvalRequests(events, now).waiting.map((e) => e.id),
+    approvalRequests({ events: [], approvals: inWindow(events) }, now).waiting.map((e) => e.id),
     ["recent-open"],
   );
 });
@@ -142,4 +146,20 @@ test("the backend uptime reads in hours and minutes", () => {
   assert.equal(formatUptime(30), "under a minute");
   assert.equal(formatUptime(125), "2 min");
   assert.equal(formatUptime(8_040), "2 h 14 min");
+});
+
+test("regression: a recent approval request counts as waiting even when it is not among the snapshot's newest events", () => {
+  const now = 10 * APPROVAL_WINDOW_MS;
+  const request = ask("busy", "npm publish", now - 60_000);
+  const newest = Array.from({ length: 500 }, (_, i) => event(`allow-${i}`, { timestamp: now - 50_000 + i }));
+  const { recent, waiting, open } = approvalRequests({ events: newest, approvals: inWindow([request]) }, now);
+  assert.deepEqual(
+    recent.map((e) => e.id),
+    ["busy"],
+  );
+  assert.deepEqual(
+    waiting.map((e) => e.id),
+    ["busy"],
+  );
+  assert.equal(open, 1);
 });
