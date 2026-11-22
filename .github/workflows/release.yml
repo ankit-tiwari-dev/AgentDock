@@ -73,6 +73,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           DIGEST: ${{ steps.push.outputs.digest }}
         run: |
-          notes="$(printf 'Image: `%s:%s@%s`\n\nVerify: `gh attestation verify oci://%s:%s -R %s`' \
-            "$IMAGE" "${TAG#v}" "$DIGEST" "$IMAGE" "${TAG#v}" "$GITHUB_REPOSITORY")"
+          version="${TAG#v}"
+          notes="Image: \`$IMAGE:$version@$DIGEST\`
+
+          Verify: \`gh attestation verify oci://$IMAGE:$version -R $GITHUB_REPOSITORY\`"
           gh release create "$TAG" --verify-tag --generate-notes --notes "$notes" --title "$TAG"
