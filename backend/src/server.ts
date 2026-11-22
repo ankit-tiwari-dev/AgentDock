@@ -5,7 +5,7 @@ import { WebSocketBroadcaster } from "./websocket-server.ts";
 import { SupervisorService } from "./supervisor-service.ts";
 import { AuditReadError, type AuditReader, type DashboardEvent } from "./audit-reader.ts";
 import { parseSearchQuery, parseTimelineQuery } from "./event-query.ts";
-import { contentSecurityPolicy, contentType, decodePath, findExportFile } from "./static-files.ts";
+import { cacheControl, contentSecurityPolicy, contentType, decodePath, findExportFile } from "./static-files.ts";
 import { CodexRoleService } from "./codex-role-service.ts";
 import { type CodexRoles, type Project, ProjectRegistry } from "./projects.ts";
 import { hasKey, keyStatusCache, type KeyReadOptions } from "./key-reader.ts";
@@ -483,11 +483,14 @@ export class AgentDockBackendServer {
       return;
     }
     const type = contentType(file.path);
-    const headers: Record<string, string> = { "Content-Type": type, "X-Content-Type-Options": "nosniff" };
+    const headers: Record<string, string> = {
+      "Content-Type": type,
+      "X-Content-Type-Options": "nosniff",
+      "Cache-Control": cacheControl(decoded),
+    };
     if (type.startsWith("text/html")) {
       headers["Content-Security-Policy"] = contentSecurityPolicy(file.body.toString("utf8"), this.port);
       headers["Referrer-Policy"] = "no-referrer";
-      headers["Cache-Control"] = "no-cache";
     }
     res.writeHead(200, headers);
     res.end(file.body);
