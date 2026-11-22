@@ -52,7 +52,7 @@ export interface ServerConfig {
    * supervisor comes from `ctrlplane supervisor use` or AGENTDOCK_CODEX=1, read on every run.
    */
   codexEnabled?: boolean;
-  /** The folder holding `supervisor.json`. Defaults to CTRLPLANE_HOME or ~/.ctrlplane. */
+  /** The folder holding `supervisor.json`. Defaults to CTRLPLANE_HOME or ~/.ctrlplane; refused if relative or in a project. */
   supervisorHome?: string;
   /** The environment the supervisor settings are read from. Defaults to process.env. */
   env?: Record<string, string | undefined>;
@@ -119,7 +119,7 @@ export class AgentDockBackendServer {
   private pollTimer: ReturnType<typeof setInterval> | undefined;
   private codexEnabledOverride: boolean | undefined;
   private supervisorBusy = false;
-  private supervisorHome: string;
+  private supervisorHome: string | null;
   private env: Record<string, string | undefined>;
   private runTimeoutMs: number;
   private logSink: (line: string) => void;
@@ -147,7 +147,7 @@ export class AgentDockBackendServer {
     this.projects = new ProjectRegistry(paths, codexFor);
     this.codexEnabledOverride = config?.codexEnabled;
     this.env = config?.env ?? process.env;
-    this.supervisorHome = supervisorHome(this.env, config?.supervisorHome);
+    this.supervisorHome = supervisorHome(this.env, config?.supervisorHome, paths);
     this.runTimeoutMs = config?.runTimeoutMs ?? 180_000;
     this.logSink = config?.logSink ?? stdoutLogSink;
     this.keychain = config?.keychain;

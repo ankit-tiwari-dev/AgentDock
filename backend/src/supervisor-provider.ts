@@ -72,7 +72,9 @@ export const ERROR_MESSAGES: Record<SupervisorCode, (v: MessageVars) => string> 
   NO_PROVIDER: () => OFF,
   CODEX_OFF: () => OFF,
   CONFIG_INVALID: (v) =>
-    `The supervisor settings file cannot be used (${v.problem ?? "invalid"}). Rewrite it with: ctrlplane supervisor use <provider> <model>`,
+    v.problem === "home"
+      ? "The supervisor settings file cannot be used: CTRLPLANE_HOME is relative or inside a project. Set it to a full path outside your projects."
+      : `The supervisor settings file cannot be used (${v.problem ?? "invalid"}). Rewrite it with: ctrlplane supervisor use <provider> <model>`,
   KEY_MISSING: (v) =>
     `No ${PROVIDER_LABEL[v.provider ?? "claude"]} key saved. Run: ctrlplane supervisor set-key ${v.provider ?? "claude"}`,
   KEYCHAIN_UNAVAILABLE: (v) =>
