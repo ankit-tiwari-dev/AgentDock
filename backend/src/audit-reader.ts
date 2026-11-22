@@ -69,6 +69,11 @@ export interface DashboardSnapshot {
     /** False when the CLI that wrote this database does not record cost. */
     usageRecorded: boolean;
   };
+  /**
+   * The approval requests from the last `windowMs` (D-6), read apart from `events` so newer calls cannot push them
+   * out, with the same session's later completions and requests for the same tool that "Ran afterwards" (D-7) needs.
+   */
+  approvals: { windowMs: number; events: DashboardEvent[] };
 }
 
 /** An event from search or the timeline. A large output is stored outside the database and is not sent. */
@@ -102,6 +107,8 @@ const HOOK_NAME: Record<string, string> = {
 const IDLE_AFTER_MS = 5 * 60_000;
 const SNAPSHOT_LIMIT = 500;
 const POLL_LIMIT = 500;
+/** The audit log does not record whether an approval was answered, so an older request is treated as no longer waiting. */
+export const APPROVAL_WINDOW_MS = 15 * 60 * 1000;
 
 const BASE_EVENT_COLUMNS = `
   e.rowid AS row_id, e.id, e.session_id, e.event_type, e.tool_name, e.tool_input_json, e.tool_output_json,
@@ -326,6 +333,22 @@ export class AuditReader {
          FROM events`,
     );
 
+    const since = now - APPROVAL_WINDOW_MS;
+    const approvalEvents = this.query(
+      `SELECT ${this.eventColumns()} FROM events e LEFT JOIN sessions s ON s.id = e.session_id
+        WHERE e.created_at >= ? AND (e.event_type = 'post_tool' OR e.policy_verdict = 'REQUIRE_MANUAL_APPROVAL')
+          AND EXISTS (SELECT 1 FROM events r
+                       WHERE r.created_at >= ? AND r.event_type <> 'post_tool'
+                         AND r.policy_verdict = 'REQUIRE_MANUAL_APPROVAL' AND r.session_id = e.session_id
+                         AND r.tool_name IS e.tool_name AND r.created_at <= e.created_at)
+        ORDER BY e.rowid DESC`,
+      since,
+      since,
+    )
+      .map(toEvent)
+      // "Ran afterwards" looks only at a completion's session, tool, target and time, so its output is not sent.
+      .map((event) => (event.hookEventName === "PostToolUse" ? { ...event, toolOutput: undefined } : event));
+
     return {
       source: { projectPath: this.projectPath, databasePath: this.databasePath, available: this.available() },
       events,
@@ -339,6 +362,7 @@ export class AuditReader {
         usage: projectUsage,
         usageRecorded,
       },
+      approvals: { windowMs: APPROVAL_WINDOW_MS, events: approvalEvents },
     };
   }
 

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { AuditReader } from "../src/audit-reader.ts";
-import { applyCliSchema } from "./live-view-fixture.ts";
+import { applyCliSchema, createAuditDb } from "./live-view-fixture.ts";
 
 function project() {
   const dir = mkdtempSync(join(tmpdir(), "agentdock-audit-"));
@@ -176,5 +176,56 @@ test("the rule that decided a call is shown when the CLI stores it", () => {
   } finally {
     reader.close();
     p.cleanup();
+  }
+});
+
+test("regression: an approval request stays in the snapshot's approvals when 500 newer events push it out of events", () => {
+  const a = createAuditDb();
+  const reader = new AuditReader(a.dir);
+  const now = 1_763_450_000_000;
+  const windowMs = 15 * 60_000;
+  try {
+    a.seedSession("s1");
+    a.seedSession("s2");
+    a.seedEvent("s1", {
+      verdict: "REQUIRE_MANUAL_APPROVAL",
+      toolInput: { command: "old" },
+      createdAt: now - windowMs - 1,
+    });
+    a.seedEvent("s1", {
+      verdict: "REQUIRE_MANUAL_APPROVAL",
+      toolInput: { command: "npm publish" },
+      createdAt: now - 60_000,
+    });
+    a.seedEvent("s1", {
+      eventType: "post_tool",
+      verdict: null,
+      toolInput: { command: "npm publish" },
+      createdAt: now - 59_000,
+    });
+    a.seedEvent("s1", { eventType: "post_tool", verdict: null, toolName: "Read", createdAt: now - 58_000 });
+    a.seedEvent("s2", {
+      eventType: "post_tool",
+      verdict: null,
+      toolInput: { command: "npm publish" },
+      createdAt: now - 57_000,
+    });
+    a.seedEvents("s1", 500, (i) => ({ createdAt: now - 50_000 + i }));
+
+    const snap = reader.snapshot(now);
+    assert.equal(snap.events.length, 500);
+    assert.equal(snap.counts.reviewCalls, 2);
+    assert.equal(snap.approvals.windowMs, windowMs);
+    // The request in the window and the completion "Ran afterwards" compares it with; not the other tool or session.
+    assert.deepEqual(
+      snap.approvals.events.map((e) => [e.hookEventName, e.toolName, e.sessionId, e.decision ?? null]),
+      [
+        ["PostToolUse", "Bash", "s1", null],
+        ["PreToolUse", "Bash", "s1", "REQUIRE_MANUAL_APPROVAL"],
+      ],
+    );
+  } finally {
+    reader.close();
+    a.cleanup();
   }
 });
