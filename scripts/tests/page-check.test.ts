@@ -39,19 +39,28 @@ test("measurePages starts the real backend on a seeded throwaway project and aud
   );
 });
 
+test("measurePages fails, and stops the backend, when Lighthouse fails", async () => {
+  await assert.rejects(
+    measurePages(() => ({ status: 1, stderr: "no chrome" })),
+    /lighthouse exited 1: no chrome/,
+  );
+});
+
 test("main --check compares the worst page with CONSTRAINTS.md and fails a broken run", async () => {
   const dir = mkdtempSync(join(tmpdir(), "page-check-"));
   const cwd = process.cwd();
+  // Fixed results: the backend start-up is covered by the measurePages tests above, once each.
+  const pages = (lcpMs: number) => () => Promise.resolve(PAGES.map((page) => ({ page, lcpMs, cls: 0.01, a11y: [] })));
   try {
     process.chdir(dir);
-    assert.equal(await main(["--check"], fakeLighthouse(800)), 2, "no CONSTRAINTS.md rows");
+    assert.equal(await main(["--check"], pages(800)), 2, "no CONSTRAINTS.md rows");
     writeFileSync(
       join(dir, "CONSTRAINTS.md"),
       "| Page LCP | at most 1000 ms | x |\n| Page CLS | at most 0.1 | x |\n| Accessibility | at most 0 | x |\n",
     );
-    assert.equal(await main(["--check"], fakeLighthouse(800)), 0);
-    assert.equal(await main(["--check"], fakeLighthouse(1200)), 1);
-    assert.equal(await main([], () => ({ status: 1, stderr: "no chrome" })), 2);
+    assert.equal(await main(["--check"], pages(800)), 0);
+    assert.equal(await main(["--check"], pages(1200)), 1);
+    assert.equal(await main([], () => Promise.reject(new Error("lighthouse exited 1: no chrome"))), 2);
     assert.ok(readFileSync(join(dir, "CONSTRAINTS.md"), "utf8").includes("Page LCP"));
   } finally {
     process.chdir(cwd);

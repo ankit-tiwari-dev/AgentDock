@@ -194,13 +194,18 @@ export async function measurePages(lighthouse: LighthouseRunner = runLighthouse)
   }
 }
 
-export async function main(argv: string[], lighthouse: LighthouseRunner = runLighthouse): Promise<number> {
+async function measureBuiltPages(): Promise<PageResult[]> {
+  if (!existsSync(join(ROOT, "frontend", "out", "index.html"))) {
+    throw new Error("frontend/out is missing: run npm run build first");
+  }
+  return measurePages();
+}
+
+/** `measure` is a parameter so the threshold logic can be tested without starting the backend for each case. */
+export async function main(argv: string[], measure: () => Promise<PageResult[]> = measureBuiltPages): Promise<number> {
   let results: PageResult[];
   try {
-    if (lighthouse === runLighthouse && !existsSync(join(ROOT, "frontend", "out", "index.html"))) {
-      throw new Error("frontend/out is missing: run npm run build first");
-    }
-    results = await measurePages(lighthouse);
+    results = await measure();
   } catch (error) {
     console.error("page-check: " + (error instanceof Error ? error.message : String(error)));
     return 2;
