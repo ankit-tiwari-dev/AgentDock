@@ -1,11 +1,11 @@
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { AgentDockBackendServer } from "../src/server.ts";
-import { applyCliSchema } from "./live-view-fixture.ts";
+import { applyCliSchema, createAuditDb } from "./live-view-fixture.ts";
 
 function auditProject() {
   const dir = mkdtempSync(join(tmpdir(), "agentdock-api-"));
@@ -64,6 +64,68 @@ test("a row the daemon writes is streamed to connected dashboards", async () => 
   } finally {
     socket.close();
     await server.stop();
+    p.cleanup();
+  }
+});
+
+async function getState(dir: string, t: TestContext) {
+  const logs: string[] = [];
+  t.mock.method(console, "error", (...args: unknown[]) => logs.push(args.map(String).join(" ")));
+  const server = new AgentDockBackendServer({ port: 0, projectPath: dir });
+  const { port } = await server.start();
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/dashboard/state`);
+    return { status: res.status, body: (await res.json()) as Record<string, unknown>, logs: logs.join("\n") };
+  } finally {
+    await server.stop();
+  }
+}
+
+test("regression: a missing column gives 503 SCHEMA_MISMATCH, not an empty state that looks safe", async (t) => {
+  const a = createAuditDb();
+  try {
+    a.seedSession("s1");
+    a.seedEvent("s1", { verdict: "REQUIRE_MANUAL_APPROVAL", createdAt: Date.now() });
+    a.db.exec("ALTER TABLE events DROP COLUMN execution_duration_ms;");
+    const { status, body, logs } = await getState(a.dir, t);
+    assert.equal(status, 503);
+    assert.equal(body.code, "SCHEMA_MISMATCH");
+    assert.equal(typeof body.error, "string");
+    assert.equal(body.events, undefined);
+    assert.ok(!/select|from events|no such column|execution_duration_ms/i.test(`${String(body.error)}\n${logs}`), logs);
+  } finally {
+    a.cleanup();
+  }
+});
+
+test("regression: a locked audit database gives 503 DB_UNAVAILABLE, not an unavailable empty state", async (t) => {
+  const a = createAuditDb();
+  try {
+    a.seedSession("s1");
+    a.seedEvent("s1", { verdict: "REQUIRE_MANUAL_APPROVAL", createdAt: Date.now() });
+    a.db.exec("PRAGMA locking_mode = EXCLUSIVE; BEGIN EXCLUSIVE;");
+    a.seedSession("s2");
+    const { status, body } = await getState(a.dir, t);
+    a.db.exec("ROLLBACK;");
+    assert.equal(status, 503);
+    assert.equal(body.code, "DB_UNAVAILABLE");
+    assert.equal(body.source, undefined);
+  } finally {
+    a.cleanup();
+  }
+});
+
+test("regression: an older CLI's log without rule_id or session_usage still gives 200 with its events", async (t) => {
+  const p = auditProject();
+  try {
+    p.addEvent("REQUIRE_MANUAL_APPROVAL");
+    const { status, body } = await getState(p.dir, t);
+    assert.equal(status, 200);
+    const state = body as { events: unknown[]; counts: { reviewCalls: number; usageRecorded: boolean } };
+    assert.equal(state.events.length, 1);
+    assert.equal(state.counts.reviewCalls, 1);
+    assert.equal(state.counts.usageRecorded, false);
+  } finally {
     p.cleanup();
   }
 });
